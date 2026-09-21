@@ -1,0 +1,6 @@
+ccxt>=4.0.0
+pandas
+ta
+python-dotenv
+flask
+requests
