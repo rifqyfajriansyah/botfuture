@@ -71,14 +71,15 @@ class StateManager:
     # Cooldown & Protection Management
     # =========================================================================
     
-    def set_cooldown(self, symbol=None, minutes=None, reason="", ignore_loss_multiplier=False):
+    def set_cooldown(self, symbol=None, minutes=None, reason="", sym_minutes=None, ignore_loss_multiplier=False):
         """
         Aktifkan cooldown global dan/atau per-symbol.
         
         Args:
             symbol: (Opsional) Symbol spesifik yang di-cooldown
-            minutes: Durasi dalam menit (default: config.SIGNAL_COOLDOWN_MINUTES)
+            minutes: Durasi global dalam menit (default: config.SIGNAL_COOLDOWN_MINUTES)
             reason: Alasan cooldown
+            sym_minutes: (Opsional) Durasi khusus symbol dalam menit (default: config.SYMBOL_COOLDOWN_MINUTES)
             ignore_loss_multiplier: Abaikan pengali consecutive loss (misal untuk timeout order biasa)
         """
         now = time.time()
@@ -86,14 +87,17 @@ class StateManager:
         # Hitung durasi cooldown global (cek consecutive loss)
         losses = self.state.get("consecutive_losses", 0)
         base_minutes = minutes if minutes is not None else config.SIGNAL_COOLDOWN_MINUTES
+        fixed_cooldown = getattr(config, "FIXED_COOLDOWN_ENABLED", False)
         
-        if not ignore_loss_multiplier and losses >= config.MAX_CONSECUTIVE_LOSSES:
+        if fixed_cooldown or ignore_loss_multiplier:
+            actual_minutes = base_minutes
+        elif losses >= config.MAX_CONSECUTIVE_LOSSES:
             actual_minutes = getattr(config, "CONSECUTIVE_LOSS_PAUSE_MINUTES", 120)
             logger.warning(
                 f"🛑 Max Consecutive Losses ({losses}) tercapai! "
-                f"Cooldown panjang diaktifkan: {actual_minutes} menit (2 jam) sebelum auto-resume."
+                f"Cooldown panjang diaktifkan: {actual_minutes} menit sebelum auto-resume."
             )
-        elif not ignore_loss_multiplier and losses >= config.DOUBLE_COOLDOWN_AFTER_LOSSES:
+        elif losses >= config.DOUBLE_COOLDOWN_AFTER_LOSSES:
             actual_minutes = base_minutes * 2
             logger.warning(
                 f"⚠️ Consecutive losses = {losses}! "
@@ -107,10 +111,10 @@ class StateManager:
         
         # Set cooldown spesifik symbol jika ada
         if symbol:
-            sym_minutes = config.SYMBOL_COOLDOWN_MINUTES
-            self.state["symbol_cooldowns"][symbol] = now + (sym_minutes * 60)
+            actual_sym_minutes = sym_minutes if sym_minutes is not None else getattr(config, "SYMBOL_COOLDOWN_MINUTES", 60)
+            self.state["symbol_cooldowns"][symbol] = now + (actual_sym_minutes * 60)
             logger.info(
-                f"⏳ Cooldown {symbol} aktif selama {sym_minutes}m. Reason: {reason}"
+                f"⏳ Cooldown {symbol} aktif selama {actual_sym_minutes}m. Reason: {reason}"
             )
             
         logger.info(
@@ -183,15 +187,21 @@ class StateManager:
         symbol = pos["symbol"] if pos else None
         
         if pos:
+            # Akumulasikan PnL dari Partial TP jika ada
+            partial_pnl = float(pos.get("partial_realized_pnl", 0.0))
+            total_pnl = round(pnl + partial_pnl, 4)
+            
             trade_record = {
                 **pos,
                 "close_time": datetime.now().isoformat(),
-                "pnl": pnl,
+                "final_leg_pnl": pnl,
+                "partial_pnl": partial_pnl,
+                "pnl": total_pnl,
                 "close_reason": reason,
             }
             self.state["trade_history"].append(trade_record)
             self.state["total_trades"] += 1
-            self.state["total_profit"] += pnl
+            self.state["total_profit"] += total_pnl
             
             # Update consecutive losses
             if pnl < 0:
@@ -256,9 +266,11 @@ class StateManager:
         if start_cooldown:
             # Cooldown ringan jika order timeout/cancel (hanya jeda singkat sebelum scan koin lain)
             timeout_cooldown = getattr(config, "TIMEOUT_COOLDOWN_MINUTES", 1)
+            timeout_sym_cooldown = getattr(config, "TIMEOUT_SYMBOL_COOLDOWN_MINUTES", 15)
             self.set_cooldown(
                 symbol=symbol,
                 minutes=timeout_cooldown,
+                sym_minutes=timeout_sym_cooldown,
                 reason="Pending order cancelled/timeout",
                 ignore_loss_multiplier=True
             )

@@ -570,13 +570,54 @@ class OrderManager:
     # Realized PnL & Close Position
     # =========================================================================
     
-    def get_realized_pnl(self, symbol, side, entry_price, amount, fallback_close_price=None, close_order_id=None):
+    def get_realized_pnl(self, symbol, side, entry_price, amount, fallback_close_price=None, close_order_id=None, entry_time=None):
         """
         Dapatkan PnL riil dari Binance API berdasarkan trades history (menjumlahkan seluruh fills dan memotong fee komisi).
+        Hanya membaca trade yang terjadi SETELAH entry_time untuk mencegah mengambil data lama.
         Jika tidak tersedia, gunakan fallback calculation dari harga close riil dikurangi estimasi fee.
         """
+        if not entry_time:
+            pos = self.state.get_position()
+            if pos and pos.get("symbol") == symbol:
+                entry_time = pos.get("entry_time")
+
+        entry_ts_ms = 0
+        if entry_time:
+            try:
+                from datetime import datetime
+                if isinstance(entry_time, str):
+                    entry_dt = datetime.fromisoformat(entry_time)
+                else:
+                    entry_dt = entry_time
+                entry_ts_ms = entry_dt.timestamp() * 1000.0 - 10000.0  # buffer 10 detik
+            except Exception:
+                entry_ts_ms = 0
+
         try:
-            trades = self.exchange.fetch_my_trades(symbol, limit=20)
+            # Beri jeda singkat agar Binance selesai mengindeks fills dari order yang baru dieksekusi
+            time.sleep(0.6)
+            
+            # Coba fetch trades dengan retry jika close_order_id belum terindeks
+            trades = []
+            for _ in range(3):
+                since_param = int(entry_ts_ms) if entry_ts_ms > 0 else None
+                trades = self.exchange.fetch_my_trades(symbol, since=since_param, limit=20)
+                if entry_ts_ms > 0:
+                    trades = [t for t in trades if (t.get("timestamp") or 0) >= entry_ts_ms]
+                
+                if close_order_id:
+                    matched = [
+                        t for t in trades 
+                        if str(t.get("order")) == str(close_order_id) or 
+                           str(t.get("info", {}).get("orderId")) == str(close_order_id)
+                    ]
+                    if matched:
+                        trades = matched
+                        break
+                elif trades:
+                    break
+                time.sleep(0.5)
+
             if trades:
                 def _calc_net_pnl(trade_batch):
                     gross_pnl = sum(float(t.get("info", {}).get("realizedPnl", 0)) for t in trade_batch)
@@ -603,7 +644,7 @@ class OrderManager:
                         )
                         return round(net, 4)
 
-                # 2. Jika close_order_id tidak ada (misal closed on exchange / SL triggered), cari batch order penutupan terakhir
+                # 2. Jika close_order_id tidak ada (misal closed on exchange / SL triggered), cari batch order penutupan terakhir SETELAH entry
                 close_side = "sell" if side == "long" else "buy"
                 closing_trades = [
                     t for t in trades 
@@ -647,9 +688,47 @@ class OrderManager:
                 f"📊 Fallback Calculated PnL: Gross {gross_fallback_pnl:+.4f} | "
                 f"Est. Fee -{estimated_fee:.4f} | Net: {net_fallback_pnl:+.4f} USDT"
             )
-            return round(net_fallback_pnl, 4)
+    def close_partial(self, symbol, side, amount, reason="partial_tp"):
+        """
+        Close sebagian posisi aktif via MARKET order reduceOnly.
+        Tidak menghapus state posisi secara keseluruhan, hanya mengeksekusi order pengurangan kontrak.
+        """
+        for attempt in range(self.MAX_RETRIES):
+            try:
+                close_side = "sell" if side == "long" else "buy"
+                amount_str = self.exchange.amount_to_precision(symbol, amount)
+                amount = float(amount_str)
                 
-        return 0.0
+                logger.info(
+                    f"💰 Partial Closing {side.upper()} {symbol} | "
+                    f"Amount: {amount} | Reason: {reason} (attempt {attempt + 1})"
+                )
+                
+                order = self.exchange.create_order(
+                    symbol=symbol,
+                    type="market",
+                    side=close_side,
+                    amount=amount,
+                    params={"reduceOnly": True},
+                )
+                
+                close_price = order.get("average") or order.get("price", 0)
+                if not close_price or float(close_price) <= 0:
+                    close_price = self.get_current_price(symbol)
+                logger.info(f"✅ Partial position closed @ {close_price}")
+                return order
+                
+            except ccxt.NetworkError as e:
+                logger.error(f"❌ Network error partial closing position (attempt {attempt + 1}): {e}")
+                if attempt < self.MAX_RETRIES - 1:
+                    time.sleep(self.RETRY_DELAY * (attempt + 1))
+                    continue
+            except Exception as e:
+                logger.error(f"❌ Error during partial close (attempt {attempt + 1}): {e}")
+                if attempt < self.MAX_RETRIES - 1:
+                    time.sleep(self.RETRY_DELAY)
+                    continue
+        return None
 
     def close_position(self, symbol, side, amount, reason="manual"):
         """
