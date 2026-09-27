@@ -255,8 +255,10 @@ class TrailingManager:
                         elapsed_minutes = (datetime.now() - entry_dt).total_seconds() / 60.0
                         aged_minutes = getattr(config, "TIME_PROGRESSIVE_MINUTES", 120)
                         if elapsed_minutes >= aged_minutes:
-                            stall_min = getattr(config, "STALL_GUARD_AGED_MIN_PROFIT_PERCENT", 1.05)
-                            pullback_thresh = getattr(config, "STALL_GUARD_AGED_PULLBACK_PERCENT", 0.32)
+                            # Selaras dengan Checkpoint 1 dinamis: aktif di 70% CP1 agar tidak tumpang tindih
+                            dyn_cp1 = self.get_dynamic_trailing_params(symbol)["first_cp"]
+                            stall_min = round(max(0.95, dyn_cp1 * 0.70), 2)
+                            pullback_thresh = round(max(0.28, pullback_thresh * 0.85), 2)
                             min_exit_profit = getattr(config, "STALL_GUARD_AGED_MIN_EXIT_PROFIT", 0.60)
                     except Exception:
                         pass
@@ -484,12 +486,15 @@ class TrailingManager:
                 
                 highest_p = pos.get("highest_profit_pct", 0.0)
                 eff_profit = max(highest_p, profit_pct)
-                first_cp = getattr(config, "TRAILING_FIRST_CHECKPOINT_PERCENT", 1.5)
                 
-                # Jika koin sudah tembus checkpoint 1 (+1.5%), jangan ganggu dengan stop waktu!
+                # Checkpoint 1 dinamis koin tersebut (Bebas tumpang tindih)
+                dyn_cp_params = self.get_dynamic_trailing_params(symbol)
+                first_cp = dyn_cp_params["first_cp"]
+                
+                # Jika koin sudah tembus checkpoint 1 dinamis, serahkan penuh ke Trailing Ratchet (jangan ganggu dengan stop waktu!)
                 if eff_profit < first_cp:
                     req_minutes = getattr(config, "TIME_PROGRESSIVE_MINUTES", 120)
-                    stagnant_max = getattr(config, "TIME_PROGRESSIVE_STAGNANT_MAX_PROFIT", 1.2)
+                    stagnant_max = round(first_cp - 0.20, 2)
                     
                     if elapsed_minutes >= req_minutes and eff_profit <= stagnant_max and eff_profit >= 0.2:
                         bep_stop_pct = getattr(config, "TIME_PROGRESSIVE_BEP_STOP", 0.18)
@@ -569,9 +574,9 @@ class TrailingManager:
         if getattr(config, "DOM_ADAPTIVE_LOCK_ENABLED", True) and not pos.get("dom_adaptive_locked", False):
             eff_profit = max(pos.get("highest_profit_pct", 0.0), profit_pct)
             min_trigger = getattr(config, "DOM_MIN_PROFIT_TRIGGER", 0.80)
-            first_cp = getattr(config, "TRAILING_FIRST_CHECKPOINT_PERCENT", 1.5)
+            first_cp = self.get_dynamic_trailing_params(symbol)["first_cp"]
             
-            # Hanya aktif jika sudah cuan >= 0.8% dan belum tembus checkpoint 1 (+1.5%)
+            # Hanya aktif jika sudah cuan >= 0.8% dan belum tembus checkpoint 1 dinamis
             if eff_profit >= min_trigger and eff_profit < first_cp:
                 dom_chg = self._get_btcdom_momentum()
                 threshold = getattr(config, "DOM_SHOCK_THRESHOLD_PERCENT", 0.15)
