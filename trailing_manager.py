@@ -68,36 +68,120 @@ class TrailingManager:
             
         return 0.0
     
-    def get_stop_level_for_checkpoint(self, checkpoint):
+    def _get_symbol_atr_pct(self, symbol):
         """
-        Tentukan level stop profit berdasarkan checkpoint.
-        - Checkpoint 1.5% → Stop di 0.7% (Garansi cuan ~$3.15 bersih)
-        - Checkpoint 2.5% → Stop di 1.5% (Garansi cuan ~$6.75 bersih)
-        - Checkpoint 3.5% → Stop di 2.5% (Garansi cuan ~$11.25 bersih)
-        - dst...
+        Ambil volatilitas ATR 14 (timeframe 15m) koin saat ini dalam satuan persen (%).
+        Cached selama 60 detik untuk efisiensi API.
+        Fallback default: 0.85% jika gagal fetch.
         """
-        first_cp = getattr(config, "TRAILING_FIRST_CHECKPOINT_PERCENT", 1.5)
-        first_stop = getattr(config, "TRAILING_FIRST_STOP_PERCENT", 0.7)
-        offset = getattr(config, "TRAILING_STOP_OFFSET", 1.0)
+        now = time.time()
+        if not hasattr(self, "_cached_atr"):
+            self._cached_atr = {}
+            
+        cached = self._cached_atr.get(symbol)
+        if cached and (now - cached["time"] < 60):
+            return cached["atr_pct"]
+            
+        try:
+            tf = getattr(config, "TRADING_TIMEFRAME", "15m")
+            candles = self.order_mgr.exchange.fetch_ohlcv(symbol, tf, limit=16)
+            if candles and len(candles) >= 14:
+                tr_list = []
+                for i in range(1, len(candles)):
+                    h = candles[i][2]
+                    l = candles[i][3]
+                    prev_c = candles[i-1][4]
+                    tr = max(h - l, abs(h - prev_c), abs(l - prev_c))
+                    tr_list.append(tr)
+                atr_val = sum(tr_list[-14:]) / 14.0
+                last_close = candles[-1][4]
+                atr_pct = (atr_val / last_close) * 100.0 if last_close > 0 else 0.85
+                self._cached_atr[symbol] = {"atr_pct": atr_pct, "time": now}
+                return atr_pct
+        except Exception as e:
+            logger.debug(f"Gagal hitung ATR live {symbol}: {e}")
+            
+        return 0.85
+    
+    def get_dynamic_tp_target(self, symbol):
+        """Hitung target partial TP dinamis berdasarkan ATR koin."""
+        if not getattr(config, "DYNAMIC_TP_ENABLED", True):
+            return getattr(config, "PARTIAL_TP_PERCENT", 2.42)
+            
+        atr_pct = self._get_symbol_atr_pct(symbol)
+        mult = getattr(config, "DYNAMIC_TP_ATR_MULTIPLIER", 2.2)
+        min_p = getattr(config, "DYNAMIC_TP_MIN_PERCENT", 1.75)
+        max_p = getattr(config, "DYNAMIC_TP_MAX_PERCENT", 3.60)
+        
+        calc_tp = atr_pct * mult
+        return round(max(min_p, min(max_p, calc_tp)), 2)
+    
+    def get_dynamic_trailing_params(self, symbol):
+        """Hitung checkpoint 1, stop level 1, dan offset pengawalan dinamis berdasarkan ATR koin."""
+        atr_pct = self._get_symbol_atr_pct(symbol)
+        
+        # 1. Checkpoint 1
+        cp1_ratio = getattr(config, "TRAILING_FIRST_CHECKPOINT_ATR_RATIO", 1.8)
+        cp1_min = getattr(config, "TRAILING_FIRST_CHECKPOINT_MIN_PERCENT", 1.45)
+        first_cp = round(max(cp1_min, atr_pct * cp1_ratio), 2)
+        
+        # 2. Stop Level 1
+        stop1_ratio = getattr(config, "TRAILING_FIRST_STOP_ATR_RATIO", 0.85)
+        stop1_min = getattr(config, "TRAILING_FIRST_STOP_MIN_PERCENT", 0.70)
+        first_stop = round(max(stop1_min, atr_pct * stop1_ratio), 2)
+        
+        # 3. Trailing Offset (Ruang napas)
+        offset_ratio = getattr(config, "TRAILING_STOP_OFFSET_ATR_RATIO", 0.85)
+        offset_min = getattr(config, "TRAILING_STOP_OFFSET_MIN", 0.70)
+        offset_max = getattr(config, "TRAILING_STOP_OFFSET_MAX", 1.20)
+        offset = round(max(offset_min, min(offset_max, atr_pct * offset_ratio)), 2)
+        
+        step = getattr(config, "TRAILING_CHECKPOINT_STEP", 0.50)
+        
+        return {
+            "first_cp": first_cp,
+            "first_stop": first_stop,
+            "offset": offset,
+            "step": step,
+            "atr_pct": round(atr_pct, 2)
+        }
+    
+    def get_stop_level_for_checkpoint(self, checkpoint, symbol=None):
+        """
+        Tentukan level stop profit berdasarkan checkpoint (Dinamis Adaptif ATR).
+        """
+        if symbol:
+            p = self.get_dynamic_trailing_params(symbol)
+            first_cp = p["first_cp"]
+            first_stop = p["first_stop"]
+            offset = p["offset"]
+        else:
+            first_cp = getattr(config, "TRAILING_FIRST_CHECKPOINT_PERCENT", 1.65)
+            first_stop = getattr(config, "TRAILING_FIRST_STOP_PERCENT", 0.80)
+            offset = getattr(config, "TRAILING_STOP_OFFSET", 0.85)
         
         if checkpoint <= first_cp:
             return first_stop
         else:
-            return checkpoint - offset
+            return round(checkpoint - offset, 2)
     
-    def get_highest_reached_checkpoint(self, profit_pct):
+    def get_highest_reached_checkpoint(self, profit_pct, symbol=None):
         """
-        Hitung checkpoint tertinggi yang sudah tercapai oleh profit saat ini.
-        Mendukung lompatan harga instan (misal loncat langsung ke +5%).
+        Hitung checkpoint tertinggi yang sudah tercapai oleh profit saat ini (Dinamis Adaptif ATR).
         """
-        first_cp = getattr(config, "TRAILING_FIRST_CHECKPOINT_PERCENT", 1.5)
-        step = getattr(config, "TRAILING_CHECKPOINT_STEP", 1.0)
+        if symbol:
+            p = self.get_dynamic_trailing_params(symbol)
+            first_cp = p["first_cp"]
+            step = p["step"]
+        else:
+            first_cp = getattr(config, "TRAILING_FIRST_CHECKPOINT_PERCENT", 1.65)
+            step = getattr(config, "TRAILING_CHECKPOINT_STEP", 0.50)
         
         if profit_pct < first_cp:
             return 0
             
         steps = int((profit_pct - first_cp) // step)
-        return first_cp + (steps * step)
+        return round(first_cp + (steps * step), 2)
     
     def update(self, symbol, entry_price, current_price, side, amount):
         """
@@ -139,27 +223,52 @@ class TrailingManager:
                 result["action"] = "stop_triggered"
                 return result
         
-        # 2b. PARTIAL TAKE PROFIT (Target Utama +2.42% ATAU Stall Guard "Bensin Habis" di Tengah Jalan)
+        # 2b. PARTIAL TAKE PROFIT (Target Dinamis ATR ATAU Stall Guard "Bensin Habis" di Tengah Jalan)
         if getattr(config, "PARTIAL_TP_ENABLED", True) and not pos.get("partial_tp_done", False):
-            tp_target_pct = getattr(config, "PARTIAL_TP_PERCENT", 2.42)
+            # Target TP Dinamis Adaptif ATR koin
+            tp_target_pct = self.get_dynamic_tp_target(symbol)
             hit_main_target = profit_pct >= tp_target_pct
             
             # Cek Stall Guard ("Bensin Habis di Tengah Jalan")
             hit_stall_guard = False
             stall_reason = ""
             if not hit_main_target and getattr(config, "STALL_GUARD_ENABLED", True):
-                stall_min = getattr(config, "STALL_GUARD_MIN_PROFIT_PERCENT", 1.26)
-                stall_max = getattr(config, "STALL_GUARD_MAX_PROFIT_PERCENT", 2.38)
-                pullback_thresh = getattr(config, "STALL_GUARD_PULLBACK_PERCENT", 0.42)
+                # Ambang aktif dinamis: 60% perjalanan menuju Target TP Dinamis
+                trigger_ratio = getattr(config, "STALL_GUARD_TRIGGER_RATIO", 0.60)
+                floor_min = getattr(config, "STALL_GUARD_MIN_PROFIT_FLOOR", 1.10)
+                stall_min = round(max(floor_min, tp_target_pct * trigger_ratio), 2)
+                stall_max = round(tp_target_pct - 0.05, 2)
                 
-                highest_p = float(self.state.get_highest_profit() or 0.0)
-                if highest_p >= stall_min and profit_pct < stall_max and profit_pct >= 0.8:
-                    # Skenario A: Melorot >= 0.42% dari puncak profit yang pernah dicapai
+                # Toleransi melorot dinamis adaptif ATR koin
+                atr_pct = self._get_symbol_atr_pct(symbol)
+                pullback_ratio = getattr(config, "STALL_GUARD_DYNAMIC_PULLBACK_RATIO", 0.40)
+                min_pb = getattr(config, "STALL_GUARD_MIN_PULLBACK_PERCENT", 0.32)
+                max_pb = getattr(config, "STALL_GUARD_MAX_PULLBACK_PERCENT", 0.60)
+                pullback_thresh = round(max(min_pb, min(max_pb, atr_pct * pullback_ratio)), 2)
+                min_exit_profit = getattr(config, "STALL_GUARD_MIN_EXIT_PROFIT", 0.75)
+                
+                # Cek umur trade untuk Stall Guard koin matang / berumur (>= 120 menit)
+                entry_time_str = pos.get("entry_time")
+                if entry_time_str:
+                    try:
+                        entry_dt = datetime.fromisoformat(entry_time_str)
+                        elapsed_minutes = (datetime.now() - entry_dt).total_seconds() / 60.0
+                        aged_minutes = getattr(config, "TIME_PROGRESSIVE_MINUTES", 120)
+                        if elapsed_minutes >= aged_minutes:
+                            stall_min = getattr(config, "STALL_GUARD_AGED_MIN_PROFIT_PERCENT", 1.05)
+                            pullback_thresh = getattr(config, "STALL_GUARD_AGED_PULLBACK_PERCENT", 0.32)
+                            min_exit_profit = getattr(config, "STALL_GUARD_AGED_MIN_EXIT_PROFIT", 0.60)
+                    except Exception:
+                        pass
+                
+                highest_p = float(pos.get("highest_profit_pct", 0.0) or 0.0)
+                if highest_p >= stall_min and profit_pct < stall_max and profit_pct >= min_exit_profit:
+                    # Skenario A: Melorot >= pullback_thresh dari puncak profit yang pernah dicapai
                     if (highest_p - profit_pct) >= pullback_thresh:
                         hit_stall_guard = True
-                        stall_reason = f"stall_pullback (Peak +{highest_p:.2f}% -> Now +{profit_pct:.2f}%)"
+                        stall_reason = f"stall_pullback (Peak +{highest_p:.2f}% -> Now +{profit_pct:.2f}% | Thresh: {pullback_thresh}%)"
                     else:
-                        # Skenario B: Terbentuk jarum penolakan (rejection wick >= 28%) pada lilin 15m
+                        # Skenario B: Terbentuk jarum penolakan (rejection wick >= 30%) pada lilin 15m
                         try:
                             tf = getattr(config, "TRADING_TIMEFRAME", "15m")
                             candles = self.order_mgr.exchange.fetch_ohlcv(symbol, tf, limit=2)
@@ -171,7 +280,7 @@ class TrailingManager:
                                 c_p = float(l_c[4])
                                 c_range = h_p - l_p
                                 if c_range > 0:
-                                    wick_thresh = getattr(config, "STALL_GUARD_WICK_PERCENT", 28.0)
+                                    wick_thresh = getattr(config, "STALL_GUARD_WICK_PERCENT", 30.0)
                                     if side == "long":
                                         upper_wick = (h_p - max(o_p, c_p)) / c_range * 100.0
                                         if upper_wick >= wick_thresh and (highest_p - profit_pct) >= 0.22:
@@ -185,6 +294,24 @@ class TrailingManager:
                         except Exception as e:
                             logger.debug(f"Stall guard wick check error: {e}")
             
+            # 2a. STALL GUARD FULL CLOSE (Hanya jika disetel True eksplisit, default: False agar 50% jadi Moonbag)
+            if hit_stall_guard and getattr(config, "STALL_GUARD_CLOSE_FULL", False):
+                logger.info(
+                    f"🛑 STALL GUARD FULL CLOSE TRIGGERED! ({stall_reason}) | "
+                    f"Momentum habis di tengah jalan (+{profit_pct:.2f}%). "
+                    f"Closing 100% position ({amount} {symbol}) to lock full profit in cash..."
+                )
+                close_order = self.order_mgr.close_position(
+                    symbol=symbol,
+                    side=side,
+                    amount=amount,
+                    reason=f"stall_guard_full_{profit_pct:.2f}%"
+                )
+                if close_order:
+                    result["action"] = "stall_guard_full_close"
+                    return result
+
+            # 2b. PARTIAL TP (Main Target Dinamis ATAU Stall Guard 50% Moonbag)
             if hit_main_target or hit_stall_guard:
                 ratio = getattr(config, "PARTIAL_TP_RATIO", 0.5)
                 raw_tp_amount = amount * ratio
@@ -194,7 +321,7 @@ class TrailingManager:
                     tp_amount = raw_tp_amount
                     
                 if tp_amount > 0 and tp_amount < amount:
-                    trigger_desc = f"MAIN TARGET (+{profit_pct:.2f}% >= +{tp_target_pct}%)" if hit_main_target else f"STALL GUARD ({stall_reason})"
+                    trigger_desc = f"DYNAMIC TARGET (+{profit_pct:.2f}% >= +{tp_target_pct}%)" if hit_main_target else f"STALL GUARD ({stall_reason})"
                     logger.info(
                         f"🎉 PARTIAL TP TRIGGERED! {trigger_desc} | "
                         f"Executing 50% TP ({tp_amount} {symbol}) to lock cash in pocket..."
@@ -235,10 +362,11 @@ class TrailingManager:
                         amount = remaining_amount
                         
                         # Kunci stop sisa 50% posisi:
-                        # Jika Main Target (+2.42%) -> Kunci stop di +0.72% / +1.26%
-                        # Jika Stall Guard (di tengah jalan) -> Kunci stop di BEP (+0.22% cover fee)
+                        # Jika Main Target -> Kunci stop di level stop Checkpoint 1 dinamis
+                        # Jika Stall Guard -> Kunci stop di BEP (+0.22% cover fee)
                         if hit_main_target:
-                            bep_pct = getattr(config, "TRAILING_FIRST_STOP_PERCENT", 0.72)
+                            dyn_params = self.get_dynamic_trailing_params(symbol)
+                            bep_pct = dyn_params["first_stop"]
                         else:
                             bep_pct = 0.22  # BEP murni cover fee
                         bep_stop_price = self.calculate_stop_price(entry_price, bep_pct, side)
@@ -253,27 +381,27 @@ class TrailingManager:
                             stop_price=bep_stop_price
                         )
                         if new_stop:
-                            first_cp = getattr(config, "TRAILING_FIRST_CHECKPOINT_PERCENT", 1.48)
+                            dyn_params = self.get_dynamic_trailing_params(symbol)
                             self.state.set_trailing_stop(
                                 stop_order_id=new_stop["id"],
                                 stop_price=bep_stop_price,
-                                checkpoint_level=first_cp
+                                checkpoint_level=dyn_params["first_cp"]
                             )
                             logger.info(
                                 f"🛡️ PARTIAL TP COMPLETED! Remaining {remaining_amount} {symbol} stop "
-                                f"locked @ {bep_stop_price} (+{bep_pct}%). Free ride to the peak!"
+                                f"locked @ {bep_stop_price} (+{bep_pct}%). Free ride to the peak (Moonbag)!"
                             )
                             result["action"] = "partial_tp"
                             result["stop_price"] = bep_stop_price
                             return result
 
-        # 3. Hitung checkpoint tertinggi yang sudah tercapai
+        # 3. Hitung checkpoint tertinggi yang sudah tercapai (Dinamis Adaptif ATR)
         current_checkpoint = self.state.get_current_checkpoint() or 0
-        highest_cp = self.get_highest_reached_checkpoint(profit_pct)
+        highest_cp = self.get_highest_reached_checkpoint(profit_pct, symbol=symbol)
         
         if highest_cp > current_checkpoint:
             # Loncat langsung ke checkpoint tertinggi yang tercapai
-            stop_profit_level = self.get_stop_level_for_checkpoint(highest_cp)
+            stop_profit_level = self.get_stop_level_for_checkpoint(highest_cp, symbol=symbol)
             stop_price = self.calculate_stop_price(entry_price, stop_profit_level, side)
             
             # Cek apakah stop price baru ini benar-benar LEBIH BAIK daripada stop price saat ini

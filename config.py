@@ -41,7 +41,7 @@ CONSECUTIVE_LOSS_PAUSE_MINUTES = 60
 # ENTRY RISK GATEKEEPER (Anti-Pucuk & Filter Kualitas Sinyal)
 # =============================================================================
 MIN_ENTRY_REJECTION_WICK_PERCENT = 22.0     # Wajib ada jarum penolakan minimal 22% (momentum kuat seringkali wick 20-25%)
-MAX_ENTRY_RISK_EMA55_PERCENT = 1.35         # Maksimal jarak harga entry ke support EMA 55 hanya 1.35% (anti resiko tebal)
+MAX_ENTRY_RISK_EMA55_PERCENT = 0.88         # Maksimal jarak harga entry ke support EMA 55 hanya 0.88% (anti resiko tebal, cutloss kecil)
 ANTI_CLIMAX_LOOKBACK_CANDLES = 8            # Pantau 8 candle terakhir (2 jam)
 ANTI_CLIMAX_MAX_RSI = 70.0                  # Dilarang masuk LONG jika dalam 2 jam terakhir baru saja overbought > 70
 ANTI_CLIMAX_MIN_RSI = 30.0                  # Dilarang masuk SHORT jika dalam 2 jam terakhir baru saja oversold < 30
@@ -51,11 +51,26 @@ BTC_FLASH_DUMP_THRESHOLD_PERCENT = 0.55     # BTC flash dump aktif jika lilin 15
 BTC_FLASH_LOCK_MINUTES = 15                 # Kunci proteksi flash dump/pump selama 15m (anti-whipsaw / kedipan micro)
 BTC_FILTER_MODE = "smart"                   # 'smart': Izinkan altcoin kuat (HTF selaras) saat BTC tenang/sideways, blokir mutlak saat BTC flash dump/pump aktif
 STRICT_HTF_REQUIRED = False                 # Izinkan koin decoupling yang punya tren 1H kuat
-REVERSAL_SOLID_BREAKDOWN_PERCENT = 1.08      # Ruang napas normal 1.08% di bawah/atas EMA 55 (bukan 1.4% kegedean, non-round number)
-REVERSAL_DUMP_FAST_CUT_THRESHOLD_PERCENT = 0.56 # Tebas instan saat BTC dump jika harga >= 0.56% di bawah EMA 55 (anti-kejilat goyangan 0.2%)
-REVERSAL_EMA_BREAKDOWN_BUFFER_PERCENT = 0.58 # Toleransi candle closed wajib minimal 0.58% di bawah/atas EMA 55
-REVERSAL_GRACE_PERIOD_MINUTES = 15          # Ruang napas 15 menit pertama (anti tebas lilin lampau sebelum entry)
-REVERSAL_DUMP_FAST_CUT_ENABLED = True       # Jika di bawah EMA 55 >= 0.56% (LONG) dan terjadi BTC/Market dump, tebas instan!
+
+# ENTRY 2.0 (BTC TRAFFIC LIGHT & REGIME CONFLUENCE)
+BTC_CHOP_RSI_OVERSOLD = 38.0                # Jangan buka SHORT jika RSI 15m BTC < 38 (lantai dasar lembah, rawan dead-cat bounce)
+BTC_CHOP_RSI_OVERBOUGHT = 65.0              # Jangan buka LONG jika RSI 15m BTC > 65 (pucuk jenuh, rawan profit-taking)
+ANOMALY_MIN_SCORE = 85                      # Skor sinyal wajib >= 85 (Grade A+) untuk boleh decoupling lawan arus BTC
+ANOMALY_MIN_VOL_RATIO = 1.45                # Volume wajib >= 1.45x SMA 20 (Smart Money nyata) untuk boleh lawan arus BTC
+ENTRY_MIN_VOLUME_RATIO = 1.15               # Volume standar minimal lilin entry >= 1.15x SMA 20 (anti-candle sepi/loyo)
+
+REVERSAL_SOLID_BREAKDOWN_PERCENT = 0.78      # Batas darurat solid mutlak dirapatkan ke 0.78% (dari 1.08%, non-round number) agar minus mini
+REVERSAL_DUMP_FAST_CUT_THRESHOLD_PERCENT = 0.54 # Tebas cepat jika harga >= 0.54% di bawah EMA 55 saat ada sinyal dump
+REVERSAL_EMA_BREAKDOWN_BUFFER_PERCENT = 0.52 # Toleransi candle closed wajib minimal 0.52% di bawah/atas EMA 55
+REVERSAL_GRACE_PERIOD_MINUTES = 7           # Ruang napas normal 7 menit (dari 15m, lilin 15m matang di menit ke-7)
+REVERSAL_DUMP_FAST_CUT_ENABLED = True       # Jika di bawah EMA 55 >= 0.54% (LONG) dan terjadi BTC/Market dump, tebas instan!
+
+# MACRO PRESSURE FAST CUT (BTC & BTCDOM ADVERSE SHIELD - OPSI A)
+MACRO_PRESSURE_CUT_ENABLED = True             # Bypass Grace Period jika terjadi tekanan makro dari BTC atau BTCDOM
+MACRO_BTC_PRESSURE_DROP_PERCENT = 0.32        # Tekanan BTC jika lilin 15m drop >= -0.32% (terhadap open lilin 15m)
+MACRO_DOM_PRESSURE_SURGE_PERCENT = 0.12       # Tekanan BTCDOM jika lilin 15m melonjak melawan posisi >= 0.12%
+MACRO_PRESSURE_EMA_CUT_PERCENT = 0.54         # Batas tembus EMA 55 (0.54%) untuk eksekusi tebas instan tanpa Grace Period
+MACRO_WICK_RECOVERY_PROTECT_PERCENT = 28.0    # Jangan tebas jika koin membentuk jarum pantulan bawah >= 28% (anti-kejilat wick kagetan)
 
 
 # =============================================================================
@@ -76,28 +91,48 @@ ORDER_TIMEOUT_MINUTES = 7               # Default timeout 7 menit
 ORDER_CHECK_INTERVAL = 10               # Cek order setiap 10 detik
 
 # =============================================================================
-# PRO TRAILING STOP & PARTIAL TAKE PROFIT (Realistic Cash Growth)
+# FLEXIBLE & DYNAMIC ATR TRAILING STOP & PARTIAL TAKE PROFIT
 # =============================================================================
-# Checkpoint 1: Profit +1.48% (ROE +4.4%) → Kunci stop di +0.72% (Garansi cuan ~$3.30 bersih)
-# Checkpoint 2: Profit +1.90% (ROE +5.7%) → Geser stop ke +1.26% (Garansi cuan ~$5.80 bersih)
-# Checkpoint 3: Profit +2.32% (ROE +7.0%) → Geser stop ke +1.68% (Garansi cuan ~$7.70 bersih)
-# Checkpoint 4: Profit +2.74% (ROE +8.2%) → Geser stop ke +2.10% (Garansi cuan ~$9.65 bersih)
-TRAILING_FIRST_CHECKPOINT_PERCENT = 1.48     # Checkpoint pertama di +1.48% (ROE +4.4% di 3x)
-TRAILING_FIRST_STOP_PERCENT = 0.72           # Kunci profit bersih di +0.72% (+$3.30 USDT bersih)
-TRAILING_CHECKPOINT_STEP = 0.42              # Step checkpoint berikutnya (+1.90%, +2.32%, +2.74%, dst)
-TRAILING_STOP_OFFSET = 0.58                  # Jarak kawal stop 0.58% di bawah checkpoint (rapat & aman)
+# 1. DYNAMIC TAKE PROFIT UTAMA (Target Adaptif Volatilitas Koin)
+DYNAMIC_TP_ENABLED = True
+DYNAMIC_TP_ATR_MULTIPLIER = 2.2      # Target TP dihitung 2.2x ATR 15m koin saat entry
+DYNAMIC_TP_MIN_PERCENT = 1.75        # Target minimal +1.75% (koin tenang tetap cuan tebal ~$6 bersih)
+DYNAMIC_TP_MAX_PERCENT = 3.60        # Target maksimal +3.60% (koin roket dipanen di ~$13+ bersih)
+PARTIAL_TP_ENABLED = True            # Aktifkan eksekusi TP parsial
+PARTIAL_TP_RATIO = 0.50              # Jual 50% muatan saat target kena, sisa 50% jadi Moonbag
+PARTIAL_TP_PERCENT = 2.42            # Fallback statis jika data ATR tidak tersedia
 
-# PARTIAL TAKE PROFIT UTAMA (Target Dinaikkan ke +2.42%)
-PARTIAL_TP_ENABLED = True                   # Aktifkan TP parsial 50%
-PARTIAL_TP_PERCENT = 2.42                   # Target Utama di +2.42% (cuan ~$11.5 s/d ~$12 USDT sebelum tembok 2.50%)
-PARTIAL_TP_RATIO = 0.5                      # Jual 50% muatan, sisa 50% dibiarkan berburu pucuk
+# 2. FLEXIBLE TRAILING PROFIT RATCHET (Tangga Pengawalan Adaptif)
+DYNAMIC_TRAILING_ENABLED = True
+TRAILING_FIRST_CHECKPOINT_ATR_RATIO = 1.8  # Checkpoint 1 aktif di 1.8x ATR koin
+TRAILING_FIRST_CHECKPOINT_MIN_PERCENT = 1.45 # Minimal Checkpoint 1 aktif di +1.45%
+TRAILING_FIRST_STOP_ATR_RATIO = 0.85       # Kunci stop loss pertama di 0.85x ATR
+TRAILING_FIRST_STOP_MIN_PERCENT = 0.70     # Minimal stop loss terkunci di +0.70%
+TRAILING_STOP_OFFSET_ATR_RATIO = 0.85      # Jarak kawal stop 0.85x ATR koin (ruang napas lega)
+TRAILING_STOP_OFFSET_MIN = 0.70            # Minimal jarak stop 0.70% (anti kejilat spread)
+TRAILING_STOP_OFFSET_MAX = 1.20            # Maksimal jarak stop 1.20% (agar cuan terjaga)
+TRAILING_CHECKPOINT_STEP = 0.50            # Step checkpoint bertingkat berikutnya (+0.50%)
 
-# STALL GUARD (Deteksi Bensin Habis di Tengah Jalan)
-STALL_GUARD_ENABLED = True                  # Aktifkan eksekusi partial TP jika bensin habis sebelum target utama 2.42%
-STALL_GUARD_MIN_PROFIT_PERCENT = 1.26       # Aktif jika posisi sudah floating profit minimal +1.26%
-STALL_GUARD_MAX_PROFIT_PERCENT = 2.38       # Beroperasi di rentang cuan sebelum target 2.42%
-STALL_GUARD_PULLBACK_PERCENT = 0.42         # Bensin habis jika melorot >= 0.42% dari profit tertinggi (peak)
-STALL_GUARD_WICK_PERCENT = 28.0             # Atau terbentuk jarum atas rejection wick >= 28% di lilin 15m
+# Fallback statis trailing (jika ATR tidak tersedia)
+TRAILING_FIRST_CHECKPOINT_PERCENT = 1.65    # Checkpoint 1 fallback di +1.65%
+TRAILING_FIRST_STOP_PERCENT = 0.80          # Stop 1 fallback di +0.80%
+TRAILING_STOP_OFFSET = 0.85                 # Offset fallback di 0.85%
+
+# 3. FLEXIBLE STALL GUARD (Deteksi Bensin Habis & Moonbag Protector)
+STALL_GUARD_ENABLED = True           # Aktifkan deteksi bensin habis
+STALL_GUARD_CLOSE_FULL = False       # REVOLUSI: Jual 50% saja, jangan 100%! Sisa 50% jadi Moonbag
+STALL_GUARD_TRIGGER_RATIO = 0.60     # Aktif di 60% perjalanan menuju Target TP Dinamis
+STALL_GUARD_MIN_PROFIT_FLOOR = 1.10  # Paling cepat aktif di profit +1.10% (di atas radar BEP 0.80%)
+STALL_GUARD_DYNAMIC_PULLBACK_RATIO = 0.40 # Toleransi melorot 0.40x ATR koin dari peak
+STALL_GUARD_MIN_PULLBACK_PERCENT = 0.32   # Minimal melorot 0.32% (koin tenang)
+STALL_GUARD_MAX_PULLBACK_PERCENT = 0.60   # Maksimal melorot 0.60% (koin roket)
+STALL_GUARD_WICK_PERCENT = 30.0           # Ekor jarum atas rejection wick >= 30% lilin 15m
+STALL_GUARD_MIN_EXIT_PROFIT = 0.75        # Menjamin eksekusi stall guard tetap cuan bersih ~$5+
+
+# STALL GUARD KHUSUS KOIN MATANG / BERUMUR (>= 120 Menit)
+STALL_GUARD_AGED_MIN_PROFIT_PERCENT = 1.05
+STALL_GUARD_AGED_PULLBACK_PERCENT = 0.32
+STALL_GUARD_AGED_MIN_EXIT_PROFIT = 0.60
 
 # =============================================================================
 # TIME-PROGRESSIVE BEP (OPSI A: SATPAM KOIN LEMOT / SIDEWAYS)
@@ -135,6 +170,30 @@ TIME_DELAYED_BEP_STOP_PERCENT = 0.22
 STAGNATION_EXIT_ENABLED = False
 MAX_STAGNANT_HOURS = 3.0
 MAX_STAGNANT_MIN_PROFIT_PERCENT = 0.2
+
+# =============================================================================
+# BOUNCE FAILURE GUARD (Dead-Cat Bounce Rejection Cut)
+# =============================================================================
+# Filosofi:
+# - Saat koin sempat drop (dip) lalu MANTUL naik, kita amati kekuatannya.
+# - Jika setelah mantul harga gagal tembus entry (tertahan resisten) dan mulai melorot kembali,
+#   bot langsung tebas potong rugi saat itu juga sebelum minusnya membengkak kembali ke dasar jurang!
+BOUNCE_FAILURE_GUARD_ENABLED = True
+BOUNCE_FAILURE_MIN_DRAWDOWN_PERCENT = -0.75  # Pernah mengalami drawdown minimal -0.75% harga (ROE -2.25%)
+BOUNCE_FAILURE_MIN_REBOUND_PERCENT = 0.35    # Sempat berhasil mantul naik minimal +0.35% harga dari dasar jurang
+BOUNCE_FAILURE_SLIPPAGE_TOLERANCE = 0.25     # Jika setelah mantul harga melorot kembali >= 0.25% dari puncak pantulan -> TEBAS!
+
+# =============================================================================
+# PANIC VOLUME DUMP CUT (Deteksi Air Terjun vs Gojekan Jarum di Lilin 1m)
+# =============================================================================
+# Filosofi:
+# - Jika harga jebol di bawah EMA 55 saat drawdown >= -0.75%:
+#   Bot mengecek volume lilin 1 menit terakhir.
+# - Jika Volume >= 2.5x rata-rata 1m (Smart Money air terjun nyata) -> TEBAS INSTAN tanpa nunggu 15m!
+# - Jika Volume kecil/biasa (< 2.5x) -> TAHAN! Ini gojekan jarum likuidasi, beri ruang mantul!
+PANIC_VOLUME_CUT_ENABLED = True
+PANIC_VOLUME_CUT_MIN_DRAWDOWN = -0.75        # Hanya aktif jika drawdown sudah menyentuh -0.75% harga
+PANIC_VOLUME_CUT_RATIO = 2.5                 # Volume ledakan 1m >= 2.5x rata-rata SMA 10 lilin 1m
 
 # =============================================================================
 # DYNAMIC CONFLUENCE ENTRY (EMA 21 & ATR Pullback)
@@ -180,7 +239,7 @@ ADX_THRESHOLD = 25
 
 # Volume
 VOLUME_SMA_PERIOD = 20
-MIN_VOLUME_RATIO = 0.8          # Minimal volume 0.8x dari average 20 SMA
+MIN_VOLUME_RATIO = 1.15         # Minimal volume 1.15x dari average 20 SMA (Smart Money validasi)
 
 # Timeframes & Confirmation
 TRADING_TIMEFRAME = "15m"       # Timeframe utama (15m cepat & responsif)
@@ -190,19 +249,34 @@ CANDLE_HISTORY_CONFIRMATION_COUNT = 3
 # =============================================================================
 # SCANNER SETTINGS
 # =============================================================================
-SCANNER_TOP_N = 80              # Scan top 80 koin berdasarkan volume (universe lebih luas ~45-50 koin aktif)
+SCANNER_TOP_N = 120             # Scan top 120 koin berdasarkan volume (universe luas, banyak peluang Grade A+)
 MIN_24H_CHANGE_PERCENT = 1.0    # Minimum perubahan harga 24h (absolute)
 MAX_SPREAD_PERCENT = 0.05       # Maximum spread yang diperbolehkan
 
-# Blacklist koin (stablecoins, TradFi perps, slow-moving heavyweights, low liquidity, dll)
+# Blacklist koin (delisting risk, monitoring tag, stablecoins, TradFi perps, slow-moving heavyweights, anomali liar)
 BLACKLIST_COINS = [
     # Slow-moving Heavyweights (fokus ke altcoin yang lincah & berbobot volatilitas bagus)
     "BTC/USDT", "BTC",
     "ETH/USDT", "ETH",
+
     # Stablecoins
     "USDC/USDT", "BUSD/USDT", "TUSD/USDT", "DAI/USDT",
     "USDP/USDT", "FDUSD/USDT", "USDD/USDT",
-    # TradFi Perpetuals (butuh agreement terpisah)
+
+    # Official Binance Monitoring Tag (Tag Pemantauan / Koin Berisiko Delisting)
+    "ACT", "ARK", "AVA", "AWE", "BLUR", "COOKIE", "DODO", "EPIC",
+    "FTT", "GLMR", "GNS", "GTC", "HEI", "JASMY", "LSK", "MOVE",
+    "MOVR", "NOM", "PORTAL", "QI", "QKC", "QUICK", "RARE", "RESOLV",
+    "SCR", "SOPH", "STX", "SYN", "TLM", "TOWNS", "VELODROME", "WIF",
+
+    # High-volatility political memecoins / High-risk wicks
+    "TRUMP/USDT", "TRUMP",
+
+    # TradFi Perpetuals & Stock Perps (Bukan Crypto Asli)
+    "AAOI/USDT", "AAOI",
+    "SOXS/USDT", "SOXS",
+    "DRAM/USDT", "DRAM",
+    "GOOGL/USDT", "GOOGL",
     "XAU/USDT", "XAU", "XAG/USDT", "XAG", "XPT/USDT", "XPT", "XPD/USDT", "XPD",
     "SAMSUNG/USDT", "SNDK/USDT", "CL/USDT", "SKHYNIX/USDT",
     "SOXL/USDT", "MU/USDT", "AKE/USDT", "MSTR/USDT",
@@ -211,7 +285,8 @@ BLACKLIST_COINS = [
     "CRCL/USDT", "BR/USDT", "BZ/USDT", "INTC/USDT",
     "NVDA/USDT", "TSLA/USDT", "AAPL/USDT", "MSFT/USDT",
     "AMD/USDT", "AMZN/USDT", "GOOG/USDT", "COIN/USDT",
-    "PLTR/USDT", "BABA/USDT",
+    "PLTR/USDT", "BABA/USDT", "DELL/USDT", "DELL",
+    "ARM/USDT", "ARM", "RKLB/USDT", "RKLB", "MARSCOIN/USDT", "MARSCOIN",
 ]
 
 # =============================================================================
