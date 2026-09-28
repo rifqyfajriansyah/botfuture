@@ -26,6 +26,12 @@ class SignalEngine:
         self.exchange = exchange
         self._last_btc_check_time = 0
         self._cached_btc_bias = "neutral"
+        self._cached_btc_rsi_15m = 50.0
+        self._cached_btc_15m_pct = 0.0
+        self._cached_btc_15m_drop = 0.0
+        self._cached_btc_15m_surge = 0.0
+        self._cached_dom_chg = 0.0
+        self._cached_dom_time = 0
         self._flash_lock_until = 0
         self._flash_lock_bias = None
     
@@ -132,16 +138,26 @@ class SignalEngine:
                 prev_15m = df_15m.iloc[-2]
                 rsi_15m = float(last_15m.get("rsi", 50))
                 
-                btc_flash_thresh = getattr(config, "BTC_FLASH_DUMP_THRESHOLD_PERCENT", 0.55)
-                # Deteksi flash dump / pump kilat di lilin 15m (pergerakan nyata, bukan goyangan kecil)
-                btc_15m_pct = ((float(last_15m["close"]) - float(last_15m["open"])) / float(last_15m["open"])) * 100
-                is_flash_dump_15m = (btc_15m_pct <= -btc_flash_thresh) or (btc_15m_pct <= -0.38 and float(last_15m["close"]) < float(prev_15m["low"]))
-                is_flash_pump_15m = (btc_15m_pct >= +btc_flash_thresh) or (btc_15m_pct >= +0.38 and float(last_15m["close"]) > float(prev_15m["high"]))
+                open_15m = float(last_15m["open"])
+                low_15m = float(last_15m["low"])
+                high_15m = float(last_15m["high"])
+                close_15m = float(last_15m["close"])
+                
+                btc_flash_thresh = getattr(config, "BTC_FLASH_DUMP_THRESHOLD_PERCENT", 0.50)
+                # Deteksi flash dump / pump kilat di lilin 15m (melihat Close DAN Low/High jarum live)
+                btc_15m_pct = ((close_15m - open_15m) / open_15m) * 100 if open_15m > 0 else 0.0
+                btc_15m_drop = ((low_15m - open_15m) / open_15m) * 100 if open_15m > 0 else 0.0
+                btc_15m_surge = ((high_15m - open_15m) / open_15m) * 100 if open_15m > 0 else 0.0
+                
+                is_flash_dump_15m = (btc_15m_pct <= -btc_flash_thresh) or (btc_15m_drop <= -0.45) or (btc_15m_pct <= -0.35 and close_15m < float(prev_15m["low"]))
+                is_flash_pump_15m = (btc_15m_pct >= +btc_flash_thresh) or (btc_15m_surge >= +0.45) or (btc_15m_pct >= +0.35 and close_15m > float(prev_15m["high"]))
             else:
                 rsi_15m = 50
                 is_flash_dump_15m = False
                 is_flash_pump_15m = False
                 btc_15m_pct = 0.0
+                btc_15m_drop = 0.0
+                btc_15m_surge = 0.0
             
             bias = "neutral"
             lock_duration = getattr(config, "BTC_FLASH_LOCK_MINUTES", 15) * 60
@@ -150,12 +166,12 @@ class SignalEngine:
                 bias = "bearish"
                 self._flash_lock_until = now + lock_duration
                 self._flash_lock_bias = "bearish"
-                logger.warning(f"🚨 BTC Flash Dump terdeteksi di 15m ({btc_15m_pct:+.2f}%)! Lock BEARISH {lock_duration//60}m aktif (Blokir LONG).")
+                logger.warning(f"🚨 BTC Flash Dump terdeteksi di 15m (Drop: {btc_15m_drop:+.2f}%, Chg: {btc_15m_pct:+.2f}%)! Lock BEARISH {lock_duration//60}m aktif (Blokir LONG).")
             elif is_flash_pump_15m:
                 bias = "bullish"
                 self._flash_lock_until = now + lock_duration
                 self._flash_lock_bias = "bullish"
-                logger.info(f"🚀 BTC Flash Pump terdeteksi di 15m ({btc_15m_pct:+.2f}%)! Lock BULLISH {lock_duration//60}m aktif (Blokir SHORT).")
+                logger.info(f"🚀 BTC Flash Pump terdeteksi di 15m (Surge: {btc_15m_surge:+.2f}%, Chg: {btc_15m_pct:+.2f}%)! Lock BULLISH {lock_duration//60}m aktif (Blokir SHORT).")
             elif now < self._flash_lock_until and self._flash_lock_bias:
                 bias = self._flash_lock_bias
                 rem_m = (self._flash_lock_until - now) / 60
@@ -175,11 +191,43 @@ class SignalEngine:
                     
             self._last_btc_check_time = now
             self._cached_btc_bias = bias
+            self._cached_btc_rsi_15m = rsi_15m
+            self._cached_btc_15m_pct = btc_15m_pct
+            self._cached_btc_15m_drop = btc_15m_drop
+            self._cached_btc_15m_surge = btc_15m_surge
             logger.info(f"🧭 BTC Market Regime: {bias.upper()} (1H Close: {close_1h:.1f}, 15m RSI: {rsi_15m:.1f}, 15m Chg: {btc_15m_pct:+.2f}%)")
             return bias
         except Exception as e:
             logger.warning(f"⚠️ Gagal evaluasi BTC bias: {e}")
             return "neutral"
+
+    def _get_dom_momentum(self) -> float:
+        """Ambil momentum perubahan BTCDOM di timeframe 15m (cached 30 detik)."""
+        now = time.time()
+        if now - getattr(self, "_cached_dom_time", 0) < 30:
+            return getattr(self, "_cached_dom_chg", 0.0)
+            
+        try:
+            dom_sym = getattr(config, "DOM_SYMBOL", "BTCDOM/USDT")
+            df = self.fetch_candles(dom_sym, config.TRADING_TIMEFRAME, limit=3)
+            if not df.empty and len(df) >= 1:
+                last_c = df.iloc[-1]
+                open_p = float(last_c.get("open", 0))
+                close_p = float(last_c.get("close", 0))
+                if open_p > 0:
+                    chg = ((close_p - open_p) / open_p) * 100.0
+                    self._cached_dom_chg = chg
+                    self._cached_dom_time = now
+                    return chg
+        except Exception as e:
+            logger.debug(f"Gagal fetch BTCDOM di signal engine: {e}")
+            
+        return 0.0
+
+    def _get_btc_rsi_15m(self):
+        """Ambil nilai RSI 15m BTC terkini (cache / fresh)."""
+        self._get_btc_bias()
+        return getattr(self, "_cached_btc_rsi_15m", 50.0)
 
     def _check_pullback_long(self, df_15m):
         """
@@ -236,7 +284,7 @@ class SignalEngine:
         is_green_candle = last["close"] >= last["open"]
         is_engulfing = (last["close"] > prev["open"] and last["open"] <= prev["close"] and is_green_candle)
         
-        min_wick_ratio = getattr(config, "MIN_ENTRY_REJECTION_WICK_PERCENT", 35.0) / 100.0
+        min_wick_ratio = getattr(config, "MIN_ENTRY_REJECTION_WICK_PERCENT", 22.0) / 100.0
         if lower_wick_ratio < min_wick_ratio:
             return False, 0, {"reason": f"weak_lower_wick_{lower_wick_ratio*100:.1f}%"}
             
@@ -317,7 +365,7 @@ class SignalEngine:
         if max_high_recent < ema_21 * 0.996:
             return False, 0, {"reason": "no_retest_to_ema_zone"}
             
-        # 6. Candlestick Price Action: Wajib ada rejection wick atas kuat (>= 35%)
+        # 6. Candlestick Price Action: Wajib ada rejection wick atas kuat (>= 22%)
         candle_range = last["high"] - last["low"]
         if candle_range <= 0:
             return False, 0, {"reason": "flat_candle"}
@@ -327,9 +375,9 @@ class SignalEngine:
         is_red_candle = last["close"] <= last["open"]
         is_engulfing = (last["close"] < prev["open"] and last["open"] >= prev["close"] and is_red_candle)
         
-        min_wick_ratio = getattr(config, "MIN_ENTRY_REJECTION_WICK_PERCENT", 35.0) / 100.0
+        min_wick_ratio = getattr(config, "MIN_ENTRY_REJECTION_WICK_PERCENT", 22.0) / 100.0
         if upper_wick_ratio < min_wick_ratio:
-            return False, 0, {"reason": f"weak_upper_wick_{upper_wick_ratio:.2f}"}
+            return False, 0, {"reason": f"weak_upper_wick_{upper_wick_ratio*100:.1f}%"}
             
         if last["close"] > ema_21 * 1.002:
             return False, 0, {"reason": "close_above_ema21"}
@@ -408,6 +456,19 @@ class SignalEngine:
                 btc_mode = getattr(config, "BTC_FILTER_MODE", "smart")
                 now = time.time()
                 is_flash_locked = (now < self._flash_lock_until)
+                btc_rsi_15m = self._get_btc_rsi_15m()
+                
+                # Traffic Light RSI 15m BTC (Lantai Dasar & Pucuk Guard)
+                btc_rsi_oversold = getattr(config, "BTC_CHOP_RSI_OVERSOLD", 38.0)
+                btc_rsi_overbought = getattr(config, "BTC_CHOP_RSI_OVERBOUGHT", 65.0)
+                
+                if can_short and btc_rsi_15m < btc_rsi_oversold:
+                    logger.info(f"🚫 SHORT {symbol} diblokir: RSI 15m BTC ({btc_rsi_15m:.1f}) di lantai dasar (< {btc_rsi_oversold})! Anti-short saat rawan dead-cat bounce.")
+                    can_short = False
+                    
+                if can_long and btc_rsi_15m > btc_rsi_overbought:
+                    logger.info(f"🚫 LONG {symbol} diblokir: RSI 15m BTC ({btc_rsi_15m:.1f}) di pucuk jenuh (> {btc_rsi_overbought})! Anti-buy saat rawan koreksi.")
+                    can_long = False
                 
                 if btc_mode == "smart":
                     # 1. Jika BTC AKTIF Flash Crash / Dump (lock aktif): Blokir LONG mutlak!
@@ -415,16 +476,18 @@ class SignalEngine:
                         rem_m = (self._flash_lock_until - now) / 60
                         logger.info(f"🚫 LONG {symbol} diblokir: BTC sedang Flash Crash / Dump aktif (Lock {rem_m:.1f}m)!")
                         can_long = False
-                    # 2. Jika BTC AKTIF Flash Pump (lock aktif): Blokir SHORT mutlak!
+                    # 2. Kebalikannya: Jika BTC AKTIF Flash Pump (lock aktif): Blokir SHORT mutlak!
                     elif is_flash_locked and self._flash_lock_bias == "bullish" and can_short:
                         rem_m = (self._flash_lock_until - now) / 60
                         logger.info(f"🚫 SHORT {symbol} diblokir: BTC sedang Flash Pump aktif (Lock {rem_m:.1f}m)!")
                         can_short = False
-                    # 3. Jika BTC macro Bearish (tapi tidak crash): Izinkan LONG HANYA jika koin ini tren 1H-nya murni BULLISH!
+                    # 3. Saat BTC 1H Bearish tapi TIDAK sedang Flash Dump (15m tenang):
+                    # Izinkan LONG HANYA jika koin ini tren 1H-nya murni BULLISH (Koin kuat decoupling seperti PEPE/XRP)
                     elif btc_bias == "bearish" and can_long and macro_trend != "bullish":
                         logger.info(f"🚫 LONG {symbol} diblokir: BTC Bearish & HTF 1H koin ini ({macro_trend}) bukan Bullish murni")
                         can_long = False
-                    # 4. Jika BTC macro Bullish (tapi tidak pump kilat): Izinkan SHORT HANYA jika koin ini tren 1H-nya murni BEARISH!
+                    # 4. Kebalikannya saat BTC 1H Bullish tapi TIDAK sedang Flash Pump (15m tenang):
+                    # Izinkan SHORT HANYA jika koin ini tren 1H-nya murni BEARISH (Koin lemah decoupling)
                     elif btc_bias == "bullish" and can_short and macro_trend != "bearish":
                         logger.info(f"🚫 SHORT {symbol} diblokir: BTC Bullish & HTF 1H koin ini ({macro_trend}) bukan Bearish murni")
                         can_short = False
@@ -464,54 +527,86 @@ class SignalEngine:
             if can_long:
                 is_long, score_long, details_long = self._check_pullback_long(df_15m)
                 if is_long:
-                    # Bonus skor jika macro 1H selaras
-                    if macro_trend == "bullish":
-                        score_long = min(100, score_long + 5)
-                    result["signal"] = "LONG"
-                    result["score"] = score_long
-                    result["details"] = details_long
-                    
-                    # Hitung Dynamic Confluence Entry Price (EMA 21 & ATR Pullback)
-                    if ema_21_val > 0 and atr_val > 0 and getattr(config, "DYNAMIC_PULLBACK_ENTRY_ENABLED", True):
-                        atr_pullback = current_close - (atr_mult * atr_val)
-                        suggested_entry = max(ema_21_val, atr_pullback)
-                        # Batas aman: diskon antara 0.15% s/d 1.0% dari harga saat ini
-                        max_discount_price = current_close * 0.990
-                        min_discount_price = current_close * 0.9985
-                        suggested_entry = max(max_discount_price, min(min_discount_price, suggested_entry))
-                        result["suggested_entry_price"] = suggested_entry
-                    
-                    logger.info(
-                        f"  🎯 TPLR LONG VALIDATED for {symbol} | Score: {score_long} | "
-                        f"Wick: {details_long.get('lower_wick_pct')} | RSI: {details_long.get('rsi')}"
-                    )
-                    return result
+                    # Validasi Anti-Berenang Melawan Arus BTC (Super Anomaly Check):
+                    if btc_filter_on and not is_btc and btc_bias == "bearish":
+                        anomaly_min_score = getattr(config, "ANOMALY_MIN_SCORE", 85)
+                        anomaly_min_vol = getattr(config, "ANOMALY_MIN_VOL_RATIO", 1.45)
+                        try:
+                            vol_r = float(str(details_long.get("vol_ratio", "1.0")).replace("x", ""))
+                        except Exception:
+                            vol_r = 1.0
+                        if score_long < anomaly_min_score or vol_r < anomaly_min_vol:
+                            logger.info(
+                                f"🚫 LONG {symbol} dibatalkan: BTC Bearish & Altcoin bukan super anomali "
+                                f"(Score: {score_long}/{anomaly_min_score}, Vol: {vol_r:.2f}x/{anomaly_min_vol}x)"
+                            )
+                            is_long = False
+
+                    if is_long:
+                        # Bonus skor jika macro 1H selaras
+                        if macro_trend == "bullish":
+                            score_long = min(100, score_long + 5)
+                        result["signal"] = "LONG"
+                        result["score"] = score_long
+                        result["details"] = details_long
+                        
+                        # Hitung Dynamic Confluence Entry Price (EMA 21 & ATR Pullback)
+                        if ema_21_val > 0 and atr_val > 0 and getattr(config, "DYNAMIC_PULLBACK_ENTRY_ENABLED", True):
+                            atr_pullback = current_close - (atr_mult * atr_val)
+                            suggested_entry = max(ema_21_val, atr_pullback)
+                            # Batas aman: diskon antara 0.15% s/d 1.0% dari harga saat ini
+                            max_discount_price = current_close * 0.990
+                            min_discount_price = current_close * 0.9985
+                            suggested_entry = max(max_discount_price, min(min_discount_price, suggested_entry))
+                            result["suggested_entry_price"] = suggested_entry
+                        
+                        logger.info(
+                            f"  🎯 TPLR LONG VALIDATED for {symbol} | Score: {score_long} | "
+                            f"Wick: {details_long.get('lower_wick_pct')} | RSI: {details_long.get('rsi')}"
+                        )
+                        return result
             
             # Hanya cari SHORT jika lolos HTF & BTC filter
             if can_short:
                 is_short, score_short, details_short = self._check_pullback_short(df_15m)
                 if is_short:
-                    if macro_trend == "bearish":
-                        score_short = min(100, score_short + 5)
-                    result["signal"] = "SHORT"
-                    result["score"] = score_short
-                    result["details"] = details_short
-                    
-                    # Hitung Dynamic Confluence Entry Price (EMA 21 & ATR Pullback)
-                    if ema_21_val > 0 and atr_val > 0 and getattr(config, "DYNAMIC_PULLBACK_ENTRY_ENABLED", True):
-                        atr_pullback = current_close + (atr_mult * atr_val)
-                        suggested_entry = min(ema_21_val, atr_pullback)
-                        # Batas aman: premi tawar antara 0.15% s/d 1.0% dari harga saat ini
-                        max_premium_price = current_close * 1.010
-                        min_premium_price = current_close * 1.0015
-                        suggested_entry = min(max_premium_price, max(min_premium_price, suggested_entry))
-                        result["suggested_entry_price"] = suggested_entry
-                    
-                    logger.info(
-                        f"  🎯 TPLR SHORT VALIDATED for {symbol} | Score: {score_short} | "
-                        f"Wick: {details_short.get('upper_wick_pct')} | RSI: {details_short.get('rsi')}"
-                    )
-                    return result
+                    # Validasi Anti-Berenang Melawan Arus BTC (Super Anomaly Check):
+                    if btc_filter_on and not is_btc and btc_bias == "bullish":
+                        anomaly_min_score = getattr(config, "ANOMALY_MIN_SCORE", 85)
+                        anomaly_min_vol = getattr(config, "ANOMALY_MIN_VOL_RATIO", 1.45)
+                        try:
+                            vol_r = float(str(details_short.get("vol_ratio", "1.0")).replace("x", ""))
+                        except Exception:
+                            vol_r = 1.0
+                        if score_short < anomaly_min_score or vol_r < anomaly_min_vol:
+                            logger.info(
+                                f"🚫 SHORT {symbol} dibatalkan: BTC Bullish & Altcoin bukan super anomali "
+                                f"(Score: {score_short}/{anomaly_min_score}, Vol: {vol_r:.2f}x/{anomaly_min_vol}x)"
+                            )
+                            is_short = False
+
+                    if is_short:
+                        if macro_trend == "bearish":
+                            score_short = min(100, score_short + 5)
+                        result["signal"] = "SHORT"
+                        result["score"] = score_short
+                        result["details"] = details_short
+                        
+                        # Hitung Dynamic Confluence Entry Price (EMA 21 & ATR Pullback)
+                        if ema_21_val > 0 and atr_val > 0 and getattr(config, "DYNAMIC_PULLBACK_ENTRY_ENABLED", True):
+                            atr_pullback = current_close + (atr_mult * atr_val)
+                            suggested_entry = min(ema_21_val, atr_pullback)
+                            # Batas aman: premi tawar antara 0.15% s/d 1.0% dari harga saat ini
+                            max_premium_price = current_close * 1.010
+                            min_premium_price = current_close * 1.0015
+                            suggested_entry = min(max_premium_price, max(min_premium_price, suggested_entry))
+                            result["suggested_entry_price"] = suggested_entry
+                        
+                        logger.info(
+                            f"  🎯 TPLR SHORT VALIDATED for {symbol} | Score: {score_short} | "
+                            f"Wick: {details_short.get('upper_wick_pct')} | RSI: {details_short.get('rsi')}"
+                        )
+                        return result
                     
             result["signal"] = "WAIT"
             result["details"] = {"reason": "no_clean_pullback_rejection_setup"}
@@ -585,8 +680,9 @@ class SignalEngine:
             # Cek status BTC dan momentum candle untuk deteksi dump/pump mendadak
             now_ts = time.time()
             btc_bias = self._get_btc_bias()
-            is_btc_dumping = (btc_bias == "bearish") or (now_ts < self._flash_lock_until and self._flash_lock_bias == "bearish")
-            is_btc_pumping = (btc_bias == "bullish") or (now_ts < self._flash_lock_until and self._flash_lock_bias == "bullish")
+            # Fast Cut HANYA aktif jika BTC benar-benar sedang Flash Crash / Dump aktif (bukan sekadar tren 1h statis)
+            is_btc_dumping = (now_ts < self._flash_lock_until and self._flash_lock_bias == "bearish")
+            is_btc_pumping = (now_ts < self._flash_lock_until and self._flash_lock_bias == "bullish")
             
             # Momentum lilin koin itu sendiri (15m)
             open_price = float(last.get("open", close))
@@ -594,15 +690,38 @@ class SignalEngine:
             is_alt_dumping = (candle_chg_pct <= -0.5) or (float(close) < float(prev.get("low", 0)) and candle_chg_pct <= -0.3)
             is_alt_pumping = (candle_chg_pct >= +0.5) or (float(close) > float(prev.get("high", 0)) and candle_chg_pct >= +0.3)
             
+            # Deteksi Rejection Wick koin sendiri (shock absorber anti-cut saat candle kagetan pantul V-shape)
+            candle_h = float(last.get("high", close))
+            candle_l = float(last.get("low", close))
+            candle_rng = candle_h - candle_l
+            lower_wick_pct = ((min(open_price, float(close)) - candle_l) / candle_rng * 100.0) if candle_rng > 0 else 0.0
+            upper_wick_pct = ((candle_h - max(open_price, float(close))) / candle_rng * 100.0) if candle_rng > 0 else 0.0
+            wick_protect_thresh = getattr(config, "MACRO_WICK_RECOVERY_PROTECT_PERCENT", 28.0)
+            is_wick_recovering_long = (lower_wick_pct >= wick_protect_thresh)
+            is_wick_recovering_short = (upper_wick_pct >= wick_protect_thresh)
+
+            # Cek status Makro (BTC live candle & BTCDOM momentum)
+            dom_chg = self._get_dom_momentum()
+            btc_15m_pct = getattr(self, "_cached_btc_15m_pct", 0.0)
+            btc_15m_drop = getattr(self, "_cached_btc_15m_drop", 0.0)
+            btc_15m_surge = getattr(self, "_cached_btc_15m_surge", 0.0)
+
+            macro_cut_enabled = getattr(config, "MACRO_PRESSURE_CUT_ENABLED", True)
+            macro_btc_drop_thresh = getattr(config, "MACRO_BTC_PRESSURE_DROP_PERCENT", 0.32)
+            macro_dom_surge_thresh = getattr(config, "MACRO_DOM_PRESSURE_SURGE_PERCENT", 0.12)
+            macro_ema_cut_thresh = getattr(config, "MACRO_PRESSURE_EMA_CUT_PERCENT", 0.54) / 100.0
+            
             fast_cut_enabled = getattr(config, "REVERSAL_DUMP_FAST_CUT_ENABLED", True)
+            dump_cut_thresh = getattr(config, "REVERSAL_DUMP_FAST_CUT_THRESHOLD_PERCENT", 0.54) / 100.0
             
             if current_side == "long":
                 # Reversal LONG:
-                # 1. Closed candle resmi tutup >= 0.6% di bawah EMA 55 (wajib tutup setelah entry & lewat grace period)
-                # 2. ATAU Crash live dump > 1.4% di bawah EMA 55 (emergency cut aktif kapan saja)
+                # 1. Closed candle resmi tutup >= 0.52% di bawah EMA 55 (wajib tutup setelah entry & lewat grace period)
+                # 2. ATAU Solid breakdown live > 0.78% di bawah EMA 55 (mutlak tanpa Grace Period)
                 # 3. ATAU Dead Cross EMA 21 tembus ke bawah EMA 55 (setelah grace period)
-                # 4. ATAU Fast Dump Cut: Jika harga berada di bawah EMA 55 DAN (BTC Dump aktif ATAU Altcoin dump),
-                #    TIDAK PERLU tunggu toleransi 1.4% atau candle close -> Tebas instan!
+                # 4. ATAU Macro Pressure Cut (Opsi A): Jika BTC drop >= 0.32% ATAU BTCDOM naik >= 0.12%
+                #    DAN harga tembus 0.54% di bawah EMA 55 -> BYPASS Grace Period & Tebas instan!
+                # 5. ATAU Normal Fast Dump Cut (setelah grace period)
                 prev_ema55 = prev.get("ema_55", 0)
                 is_closed_breakdown = (
                     is_prev_candle_valid and
@@ -613,14 +732,28 @@ class SignalEngine:
                 is_solid_breakdown = close < (ema_55 * (1.0 - solid_break_pct)) and ema_55 > 0
                 is_dead_cross = (not in_grace_period) and (ema_21 < ema_55 and prev.get("ema_21", 0) >= prev.get("ema_55", 0))
                 
-                # Fast cut di bawah EMA 55 saat dump (hanya jika jebol >= 0.56% di bawah EMA 55):
-                dump_cut_thresh = getattr(config, "REVERSAL_DUMP_FAST_CUT_THRESHOLD_PERCENT", 0.56) / 100.0
-                is_below_ema55 = close < (ema_55 * (1.0 - dump_cut_thresh)) and ema_55 > 0
-                is_dump_below_ema = fast_cut_enabled and is_below_ema55 and (is_btc_dumping or is_alt_dumping)
+                # Tekanan makro melawan posisi LONG:
+                is_btc_pressuring_down = (is_btc_dumping or btc_15m_pct <= -macro_btc_drop_thresh or btc_15m_drop <= -macro_btc_drop_thresh)
+                is_dom_pressuring_up = (dom_chg >= macro_dom_surge_thresh)
+                is_macro_adverse_long = is_btc_pressuring_down or is_dom_pressuring_up
+                is_below_macro_ema = close < (ema_55 * (1.0 - macro_ema_cut_thresh)) and ema_55 > 0
                 
-                if is_closed_breakdown or is_solid_breakdown or is_dead_cross or is_dump_below_ema:
-                    if is_dump_below_ema:
-                        reason = f"dump_below_ema55_0.56% (BTC:{'BEAR' if is_btc_dumping else 'OK'}, Alt:{candle_chg_pct:+.2f}%)"
+                # Opsi A: Macro Pressure Cut:
+                # Jangan panik cut saat posisi baru buka (< 15m) hanya gara-gara fluktuasi kecil BTC (-0.32%).
+                # Di dalam Grace Period, Macro Cut HANYA boleh bypass jika BTC BENAR-BENAR Flash Crash nyata (is_btc_dumping).
+                can_macro_cut = (not in_grace_period) or is_btc_dumping
+                is_macro_cut_long = macro_cut_enabled and can_macro_cut and is_macro_adverse_long and is_below_macro_ema and (not is_wick_recovering_long)
+
+                # Normal Fast cut di bawah EMA 55 (setelah lewat grace period 7m):
+                is_below_ema55 = close < (ema_55 * (1.0 - dump_cut_thresh)) and ema_55 > 0
+                is_normal_fast_cut_long = fast_cut_enabled and (not in_grace_period) and is_below_ema55 and (is_btc_dumping or is_alt_dumping)
+                
+                if is_closed_breakdown or is_solid_breakdown or is_dead_cross or is_macro_cut_long or is_normal_fast_cut_long:
+                    if is_macro_cut_long:
+                        press_cause = "BTC_DROP" if is_btc_pressuring_down else "BTCDOM_SURGE"
+                        reason = f"macro_pressure_cut_0.54% ({press_cause} BTC:{btc_15m_pct:+.2f}%, DOM:{dom_chg:+.2f}%, Alt:{candle_chg_pct:+.2f}%)"
+                    elif is_normal_fast_cut_long:
+                        reason = f"dump_below_ema55_0.54% (BTC:{'BEAR' if is_btc_dumping else 'OK'}, Alt:{candle_chg_pct:+.2f}%)"
                     elif is_solid_breakdown:
                         reason = "solid_breakdown"
                     elif is_closed_breakdown:
@@ -650,13 +783,29 @@ class SignalEngine:
                 is_solid_breakout = close > (ema_55 * (1.0 + solid_break_pct)) and ema_55 > 0
                 is_golden_cross = (not in_grace_period) and (ema_21 > ema_55 and prev.get("ema_21", 0) <= prev.get("ema_55", 0))
                 
-                # Fast cut di atas EMA 55 saat pump (hanya jika tembus >= 0.56% di atas EMA 55):
-                is_above_ema55 = close > (ema_55 * (1.0 + dump_cut_thresh)) and ema_55 > 0
-                is_pump_above_ema = fast_cut_enabled and is_above_ema55 and (is_btc_pumping or is_alt_pumping)
+                # Tekanan makro melawan posisi SHORT:
+                is_btc_pressuring_up = (is_btc_pumping or btc_15m_pct >= macro_btc_drop_thresh or btc_15m_surge >= macro_btc_drop_thresh)
+                is_dom_pressuring_down = (dom_chg <= -macro_dom_surge_thresh)
+                is_macro_adverse_short = is_btc_pressuring_up or is_dom_pressuring_down
+                is_above_macro_ema = close > (ema_55 * (1.0 + macro_ema_cut_thresh)) and ema_55 > 0
                 
-                if is_closed_breakout or is_solid_breakout or is_golden_cross or is_pump_above_ema:
-                    if is_pump_above_ema:
-                        reason = f"pump_above_ema55_0.56% (BTC:{'BULL' if is_btc_pumping else 'OK'}, Alt:{candle_chg_pct:+.2f}%)"
+                # Opsi A: Macro Pressure Cut SHORT:
+                can_macro_cut_short = (not in_grace_period) or is_btc_pumping
+                is_macro_cut_short = macro_cut_enabled and can_macro_cut_short and is_macro_adverse_short and is_above_macro_ema and (not is_wick_recovering_short)
+
+                # Normal Fast cut di atas EMA 55 (setelah lewat grace period 7m):
+                # Catatan: Jika BTC tenang (OK), jangan panik cut saat lilin 15m running baru pump tipis (anti-wick shakeout).
+                # Cut instan hanya berlaku jika BTC ikut pump, ATAU lilin altcoin benar-benar pump solid (candle_chg_pct >= +1.0%).
+                is_above_ema55 = close > (ema_55 * (1.0 + dump_cut_thresh)) and ema_55 > 0
+                is_alt_deep_pumping = (candle_chg_pct >= +1.0)
+                is_normal_fast_cut_short = fast_cut_enabled and (not in_grace_period) and is_above_ema55 and (is_btc_pumping or is_alt_deep_pumping)
+                
+                if is_closed_breakout or is_solid_breakout or is_golden_cross or is_macro_cut_short or is_normal_fast_cut_short:
+                    if is_macro_cut_short:
+                        press_cause = "BTC_PUMP" if is_btc_pressuring_up else "BTCDOM_DUMP"
+                        reason = f"macro_pressure_cut_0.54% ({press_cause} BTC:{btc_15m_pct:+.2f}%, DOM:{dom_chg:+.2f}%, Alt:{candle_chg_pct:+.2f}%)"
+                    elif is_normal_fast_cut_short:
+                        reason = f"pump_above_ema55_0.54% (BTC:{'BULL' if is_btc_pumping else 'OK'}, Alt:{candle_chg_pct:+.2f}%)"
                     elif is_solid_breakout:
                         reason = "solid_breakout"
                     elif is_closed_breakout:

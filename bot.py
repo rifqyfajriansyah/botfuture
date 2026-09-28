@@ -217,9 +217,25 @@ class TradingBot:
         )
         
         exchange_pos = self.order_mgr.fetch_position(symbol)
-        if not exchange_pos or exchange_pos["contracts"] <= 0:
+        contracts = float(exchange_pos.get("contracts", 0)) if exchange_pos else 0.0
+        notional_val = contracts * current_price
+        
+        # Jika posisi habis ATAU hanya tersisa debu pembulatan (< 1.0 USDT)
+        if not exchange_pos or contracts <= 0 or (notional_val < 1.0 and contracts > 0):
+            if contracts > 0:
+                logger.warning(
+                    f"🧹 Sisa debu pembulatan terdeteksi pada {symbol} ({contracts} contracts = ${notional_val:.2f} USDT < $1.00). "
+                    f"Membersihkan posisi dan merapikan trade..."
+                )
+                try:
+                    # Tutup sisa debu jika bisa
+                    close_side = "sell" if side == "long" else "buy"
+                    self.order_mgr.exchange.create_market_order(symbol, close_side, contracts, {"reduceOnly": True})
+                except Exception:
+                    pass
+                    
             logger.warning(
-                f"⚠️ Posisi {symbol} sudah tidak ada di Binance! Closing state & logging PnL..."
+                f"⚠️ Posisi {symbol} sudah selesai di Binance! Closing state & logging PnL..."
             )
             real_pnl = self.order_mgr.get_realized_pnl(
                 symbol=symbol,
@@ -257,7 +273,15 @@ class TradingBot:
         if trail_result["action"] == "stop_triggered":
             logger.warning("⚠️ Stop triggered detected! Verifying position...")
             verify_pos = self.order_mgr.fetch_position(symbol)
-            if not verify_pos or verify_pos["contracts"] <= 0:
+            v_contracts = float(verify_pos.get("contracts", 0)) if verify_pos else 0.0
+            v_notional = v_contracts * current_price
+            if not verify_pos or v_contracts <= 0 or (v_notional < 1.0 and v_contracts > 0):
+                if v_contracts > 0:
+                    try:
+                        close_side = "sell" if side == "long" else "buy"
+                        self.order_mgr.exchange.create_market_order(symbol, close_side, v_contracts, {"reduceOnly": True})
+                    except Exception:
+                        pass
                 real_pnl = self.order_mgr.get_realized_pnl(
                     symbol=symbol,
                     side=side,
@@ -353,6 +377,16 @@ class TradingBot:
                 f"Canceling order {order_id} for {symbol}"
             )
             self.order_mgr.cancel_order(symbol, order_id)
+            
+            # Cek jika ternyata ada partial fill yang diadopsi resmi ke state
+            pos = self.state.get_position()
+            if pos and pos.get("symbol") == symbol:
+                logger.warning(
+                    f"🛡️ Partial fill terdeteksi & diadopsi untuk {symbol} ({pos['amount']})! "
+                    f"Memasang Emergency SL..."
+                )
+                if config.EMERGENCY_SL_ENABLED:
+                    self._place_emergency_sl(pos)
             return
         
         status = self.order_mgr.check_order_filled(symbol, order_id)
@@ -415,6 +449,17 @@ class TradingBot:
     def _scan_and_trade(self):
         """Scan market, analisis signal, dan place order jika ada signal."""
         now = time.time()
+        
+        # 0. Anti-Double Position Watchdog: Pastikan exchange benar-benar bersih sebelum scan
+        open_positions = self.order_mgr.get_all_open_positions()
+        if len(open_positions) >= config.MAX_POSITIONS:
+            if now - self._last_cooldown_log >= 60:
+                logger.warning(
+                    f"🛑 Exchange Watchdog: Ditemukan {len(open_positions)} posisi aktif di Binance "
+                    f"({[p['symbol'] for p in open_positions]}). Menolak scan/entry baru untuk mencegah double position!"
+                )
+                self._last_cooldown_log = now
+            return
         
         # 1. Cek Cooldown
         is_cooldown, rem_sec, reason = self.state.is_cooldown_active()
