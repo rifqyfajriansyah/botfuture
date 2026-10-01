@@ -228,11 +228,20 @@ class TradingBot:
                     f"Membersihkan posisi dan merapikan trade..."
                 )
                 try:
-                    # Tutup sisa debu jika bisa
+                    # Tutup sisa debu jika bisa via market order reduceOnly
                     close_side = "sell" if side == "long" else "buy"
-                    self.order_mgr.exchange.create_market_order(symbol, close_side, contracts, {"reduceOnly": True})
-                except Exception:
-                    pass
+                    clean_amount = float(self.order_mgr.exchange.amount_to_precision(symbol, contracts))
+                    if clean_amount > 0:
+                        self.order_mgr.exchange.create_order(
+                            symbol=symbol,
+                            type="market",
+                            side=close_side,
+                            amount=clean_amount,
+                            params={"reduceOnly": True}
+                        )
+                        logger.info(f"✅ Sisa debu {clean_amount} {symbol} (${notional_val:.2f}) berhasil ditutup di Binance!")
+                except Exception as e_dust:
+                    logger.warning(f"⚠️ Gagal menutup sisa debu {symbol}: {e_dust}")
                     
             logger.warning(
                 f"⚠️ Posisi {symbol} sudah selesai di Binance! Closing state & logging PnL..."
@@ -413,7 +422,67 @@ class TradingBot:
                 f"⏳ Waiting limit fill: {symbol} @ {order['price']} | "
                 f"Remaining: {remaining/60:.1f} min"
             )
+            
+            # PRE-FILL WATCHDOG (Auto Gak Jadi jika momentum/market berbalik saat antri)
+            if getattr(config, "PRE_FILL_WATCHDOG_ENABLED", True):
+                should_abort, abort_reason = self._check_pre_fill_validity(order)
+                if should_abort:
+                    logger.warning(
+                        f"🛑 PRE-FILL WATCHDOG TRIGGERED! {abort_reason}. "
+                        f"Membatalkan antrian limit order {order_id} ({symbol}) agar tidak terseret!"
+                    )
+                    self.order_mgr.cancel_order(symbol, order_id)
+                    self.state.clear_pending_order(start_cooldown=True, symbol=symbol)
+                    return
     
+
+    def _check_pre_fill_validity(self, order):
+        """
+        PRE-FILL WATCHDOG:
+        Periksa apakah kondisi pasar atau pergerakan harga berbalik arah melawan order
+        selama order limit sedang antri (belum terisi).
+        Jika ya, batalkan order (Auto Gak Jadi) agar tidak terseret floating minus!
+        """
+        try:
+            symbol = order["symbol"]
+            side = order.get("side", "").lower()
+            limit_price = float(order.get("price", 0))
+            if limit_price <= 0:
+                return False, None
+                
+            current_price = self.order_mgr.get_current_price(symbol)
+            if current_price <= 0:
+                return False, None
+                
+            max_drift_pct = getattr(config, "PRE_FILL_MAX_ADVERSE_DRIFT_PERCENT", 0.35)
+            
+            # 1. Adverse Price Drift Check:
+            if side == "short":
+                drift_pct = ((current_price - limit_price) / limit_price) * 100.0
+                if drift_pct >= max_drift_pct:
+                    return True, f"Harga market naik +{drift_pct:.2f}% di atas limit short (pump melawan antrian)"
+            elif side == "long":
+                drift_pct = ((limit_price - current_price) / limit_price) * 100.0
+                if drift_pct >= max_drift_pct:
+                    return True, f"Harga market anjlok -{drift_pct:.2f}% di bawah limit long (dump melawan antrian)"
+                    
+            # 2. BTC Flash Reversal Check:
+            if getattr(config, "PRE_FILL_CHECK_BTC_REVERSAL", True):
+                bias = self.signal_engine._get_btc_bias()
+                flash_bias = getattr(self.signal_engine, "_flash_lock_bias", None)
+                flash_until = getattr(self.signal_engine, "_flash_lock_until", 0)
+                is_flash = (time.time() < flash_until and flash_bias)
+                
+                if side == "short" and (bias == "bullish" or (is_flash and flash_bias == "bullish")):
+                    return True, "BTC mendadak Bullish / Flash Pump saat antri Short"
+                elif side == "long" and (bias == "bearish" or (is_flash and flash_bias == "bearish")):
+                    return True, "BTC mendadak Bearish / Flash Crash saat antri Long"
+                    
+            return False, None
+        except Exception as e:
+            logger.error(f"Error in _check_pre_fill_validity: {e}")
+            return False, None
+
     def _place_emergency_sl(self, pos):
         """Pasang emergency stop loss safety net di Binance (-25%)."""
         symbol = pos["symbol"]

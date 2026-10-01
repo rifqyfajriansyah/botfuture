@@ -376,7 +376,13 @@ class TrailingManager:
                         logger.info(f"💰 Realized Partial TP PnL: {partial_pnl:+.4f} USDT")
                         
                         try:
-                            remaining_amount = float(self.order_mgr.exchange.amount_to_precision(symbol, amount - tp_amount))
+                            # Sinkronisasi sisa kontrak riil langsung dari Binance untuk mencegah sisa debu 0.001
+                            time.sleep(0.5)
+                            exchange_pos = self.order_mgr.fetch_position(symbol)
+                            if exchange_pos and float(exchange_pos.get("contracts", 0)) > 0:
+                                remaining_amount = float(exchange_pos["contracts"])
+                            else:
+                                remaining_amount = float(self.order_mgr.exchange.amount_to_precision(symbol, amount - tp_amount))
                         except Exception:
                             remaining_amount = amount - tp_amount
                             
