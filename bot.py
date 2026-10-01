@@ -299,6 +299,12 @@ class TradingBot:
                     f"Realized PnL: {real_pnl:+.2f} USDT"
                 )
             return
+            
+        if trail_result["action"] == "closed":
+            logger.info(
+                f"🔴 Position already CLOSED by Trailing Manager ({trail_result.get('reason')})."
+            )
+            return
         
         # Reversal Guard (15m Timeframe)
         reversal_result = self.reversal_guard.check_and_act()

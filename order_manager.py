@@ -393,11 +393,18 @@ class OrderManager:
             except ccxt.NetworkError:
                 logger.warning(f"⚠️ Network error saat cek order, coba cancel langsung...")
             
-            # Order masih open → cancel
-            self.exchange.cancel_order(order_id, symbol)
-            logger.info(f"🚫 Order {order_id} canceled for {symbol}")
-            self.state.clear_pending_order(start_cooldown=True, symbol=symbol)
-            return True
+            # Order masih open → cancel sisa antrean di exchange
+            try:
+                self.exchange.cancel_order(order_id, symbol)
+                logger.info(f"🚫 Sisa antrean order {order_id} canceled for {symbol}")
+            except ccxt.OrderNotFound:
+                logger.info(f"✅ Order {order_id} already gone when canceling.")
+            except Exception as e:
+                logger.warning(f"⚠️ Warning saat cancel order {order_id}: {e}")
+            
+            # KRUSIAL: Wajib sync posisi ke exchange untuk memastikan apakah sempat ada partial fill!
+            # Jika ada partial fill > 0, _sync_position_from_exchange akan mengadopsinya ke bot state.
+            return self._sync_position_from_exchange(symbol)
             
         except ccxt.OrderNotFound:
             logger.warning(
@@ -500,6 +507,16 @@ class OrderManager:
                 allowed_symbols.add(pending["symbol"])
                 allowed_symbols.add(pending["symbol"].replace("/", "").split(":")[0])
                 
+            # SAFETY: Tambahkan seluruh simbol yang memiliki posisi terbuka di Binance
+            # agar order SL manual (seperti XMR) tidak pernah dihapus oleh sapu bersih!
+            try:
+                open_positions = self.get_all_open_positions()
+                for op in open_positions:
+                    allowed_symbols.add(op["symbol"])
+                    allowed_symbols.add(op["symbol"].replace("/", "").split(":")[0])
+            except Exception as e:
+                logger.warning(f"⚠️ Warning fetching open positions for allowed_symbols: {e}")
+                
             try:
                 open_orders = self.exchange.fapiPrivateGetOpenOrders()
             except Exception:
@@ -546,7 +563,7 @@ class OrderManager:
             pos = self.fetch_position(symbol)
             if pos and pos["contracts"] > 0:
                 logger.warning(
-                    f"🔄 SYNC: Posisi ditemukan di exchange! "
+                    f"🔄 SYNC: Partial fill / posisi ditemukan di exchange! "
                     f"{pos['side']} {pos['contracts']} @ {pos['entry_price']}"
                 )
                 pending = self.state.get_pending_order()
@@ -560,11 +577,14 @@ class OrderManager:
                     amount=pos["contracts"],
                     order_id="synced_from_exchange",
                 )
+                return True
             else:
                 self.state.clear_pending_order(start_cooldown=True, symbol=symbol)
+                return False
         except Exception as e:
             logger.error(f"❌ Error syncing position: {e}")
             self.state.clear_pending_order(start_cooldown=True, symbol=symbol)
+            return False
     
     # =========================================================================
     # Realized PnL & Close Position
@@ -601,7 +621,7 @@ class OrderManager:
             trades = []
             for _ in range(3):
                 since_param = int(entry_ts_ms) if entry_ts_ms > 0 else None
-                trades = self.exchange.fetch_my_trades(symbol, since=since_param, limit=20)
+                trades = self.exchange.fetch_my_trades(symbol, since=since_param, limit=100)
                 if entry_ts_ms > 0:
                     trades = [t for t in trades if (t.get("timestamp") or 0) >= entry_ts_ms]
                 
@@ -1004,3 +1024,26 @@ class OrderManager:
         except Exception as e:
             logger.error(f"❌ Error fetching price for {symbol}: {e}")
             return 0
+    
+    def get_all_open_positions(self):
+        """Fetch seluruh posisi yang sedang terbuka di Binance Futures (Anti-Double Position)."""
+        try:
+            positions = self.exchange.fetch_positions()
+            open_positions = []
+            for pos in positions:
+                contracts = float(pos.get("contracts", 0) or pos.get("amount", 0) or 0)
+                notional = abs(float(pos.get("notional", 0) or 0))
+                # Abaikan sisa debu pembulatan (< 1.0 USDT)
+                if abs(contracts) > 0.0001 and (notional >= 1.0 or notional == 0):
+                    open_positions.append({
+                        "symbol": pos["symbol"],
+                        "side": pos.get("side", "long").lower(),
+                        "amount": abs(contracts),
+                        "entry_price": float(pos.get("entryPrice", 0)),
+                        "mark_price": float(pos.get("markPrice", 0)),
+                        "unrealized_pnl": float(pos.get("unrealizedPnl", 0)),
+                    })
+            return open_positions
+        except Exception as e:
+            logger.warning(f"⚠️ Error fetching all open positions: {e}")
+            return []

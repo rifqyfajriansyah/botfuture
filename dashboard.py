@@ -7,7 +7,9 @@ Menampilkan: status, posisi, orders, trailing stop, trade history.
 
 import os
 import json
-from datetime import datetime
+import time
+from datetime import datetime, timezone
+import ccxt
 from flask import Flask, render_template_string, jsonify
 import config
 from state_manager import StateManager
@@ -251,23 +253,23 @@ DASHBOARD_HTML = """
     <div class="container">
         <!-- Summary Card -->
         <div class="card">
-            <div class="card-title"><span class="icon">📊</span> Summary</div>
+            <div class="card-title"><span class="icon">📊</span> Binance Wallet & Performance</div>
             <div class="stat-grid">
                 <div class="stat-item">
-                    <div class="stat-label">Total Trades</div>
+                    <div class="stat-label">Wallet Balance (Binance)</div>
+                    <div class="stat-value neutral" id="walletBalance" style="color: #f0b90b; font-weight: 700;">-</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">Today Net Profit (Real)</div>
+                    <div class="stat-value" id="todayNetProfit">-</div>
+                </div>
+                <div class="stat-item">
+                    <div class="stat-label">Total Trades / Win Rate</div>
                     <div class="stat-value neutral" id="totalTrades">-</div>
                 </div>
                 <div class="stat-item">
-                    <div class="stat-label">Total Profit</div>
+                    <div class="stat-label">All-Time Recorded PnL</div>
                     <div class="stat-value" id="totalProfit">-</div>
-                </div>
-                <div class="stat-item">
-                    <div class="stat-label">Bot Uptime</div>
-                    <div class="stat-value neutral" id="uptime">-</div>
-                </div>
-                <div class="stat-item">
-                    <div class="stat-label">Mode</div>
-                    <div class="stat-value neutral" id="mode">-</div>
                 </div>
             </div>
         </div>
@@ -351,16 +353,24 @@ DASHBOARD_HTML = """
                 (status === 'idle' ? 'status-idle' : 
                  status === 'stopped' ? 'status-stopped' : 'status-running');
             
-            // Summary
-            document.getElementById('totalTrades').textContent = state.total_trades || 0;
+            // Summary & Binance Reality
+            const walletBal = state.binance_wallet_balance !== undefined ? state.binance_wallet_balance : (state.available_usdt || 0);
+            document.getElementById('walletBalance').textContent = '$' + Number(walletBal).toFixed(2) + ' USDT';
+            
+            const todayNet = state.today_net_pnl !== undefined ? state.today_net_pnl : 0;
+            const todayEl = document.getElementById('todayNetProfit');
+            todayEl.textContent = (todayNet >= 0 ? '+' : '') + Number(todayNet).toFixed(2) + ' USDT';
+            todayEl.className = 'stat-value ' + (todayNet >= 0 ? 'positive' : 'negative');
+            
+            const wins = state.win_count || 0;
+            const total = state.total_trades || 0;
+            const winRate = total > 0 ? ((wins / total) * 100).toFixed(1) : '0';
+            document.getElementById('totalTrades').textContent = `${total} (${winRate}% Win)`;
+            
             const profit = state.total_profit || 0;
             const profitEl = document.getElementById('totalProfit');
-            profitEl.textContent = (profit >= 0 ? '+' : '') + profit.toFixed(2) + ' USDT';
+            profitEl.textContent = (profit >= 0 ? '+' : '') + Number(profit).toFixed(2) + ' USDT';
             profitEl.className = 'stat-value ' + (profit >= 0 ? 'positive' : 'negative');
-            
-            document.getElementById('uptime').textContent = state.start_time ? 
-                new Date(state.start_time).toLocaleDateString() : '-';
-            document.getElementById('mode').textContent = '{{ mode }}';
             
             // Config
             document.getElementById('leverage').textContent = '{{ leverage }}x';
@@ -523,12 +533,71 @@ def index():
     )
 
 
+_binance_cache = {
+    "last_check": 0,
+    "wallet_balance": 0.0,
+    "today_net_pnl": 0.0,
+    "exchange": None
+}
+
+def get_live_binance_metrics():
+    """Fetch live wallet balance & today net PnL directly from Binance (cached 10s)."""
+    global _binance_cache
+    now = time.time()
+    if now - _binance_cache["last_check"] < 10:
+        return _binance_cache["wallet_balance"], _binance_cache["today_net_pnl"]
+        
+    try:
+        if _binance_cache["exchange"] is None:
+            _binance_cache["exchange"] = ccxt.binance({
+                "apiKey": config.BINANCE_API_KEY,
+                "secret": config.BINANCE_API_SECRET,
+                "options": {"defaultType": "future"}
+            })
+        ex = _binance_cache["exchange"]
+        bal = ex.fetch_balance()
+        wallet_bal = float(bal.get("USDT", {}).get("total", 0.0))
+        
+        # Hitung Net PnL hari ini (sejak 00:00 UTC)
+        now_dt = datetime.now(timezone.utc)
+        midnight_utc = now_dt.replace(hour=0, minute=0, second=0, microsecond=0)
+        start_time = int(midnight_utc.timestamp() * 1000)
+        
+        income_res = ex.fapiPrivateGetIncome({"startTime": start_time, "limit": 1000})
+        today_pnl = sum(float(x.get("income", 0)) for x in income_res if x.get("incomeType") == "REALIZED_PNL")
+        today_comm = sum(float(x.get("income", 0)) for x in income_res if x.get("incomeType") == "COMMISSION")
+        today_net = today_pnl + today_comm
+        
+        _binance_cache["wallet_balance"] = round(wallet_bal, 2)
+        _binance_cache["today_net_pnl"] = round(today_net, 2)
+        _binance_cache["last_check"] = now
+    except Exception as e:
+        pass
+        
+    return _binance_cache["wallet_balance"], _binance_cache["today_net_pnl"]
+
+
 @app.route("/api/state")
 def api_state():
     """API endpoint untuk state bot."""
     # Reload state dari file (karena bot dan dashboard proses terpisah)
     state_manager.state = state_manager._load_state()
-    return jsonify(state_manager.get_state())
+    res = state_manager.get_state()
+    
+    # Enrich dengan live Binance metrics (saldo kas & cuan riil hari ini)
+    w_bal, today_pnl = get_live_binance_metrics()
+    res["binance_wallet_balance"] = w_bal
+    res["today_net_pnl"] = today_pnl
+    
+    # Hitung win/loss count
+    th = res.get("trade_history", [])
+    wins = sum(1 for t in th if float(t.get("pnl", 0)) > 0)
+    losses = sum(1 for t in th if float(t.get("pnl", 0)) < 0)
+    res["win_count"] = wins
+    res["loss_count"] = losses
+    res["total_trades"] = len(th)
+    
+    return jsonify(res)
 
 
 def run_dashboard():

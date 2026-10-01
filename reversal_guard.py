@@ -117,7 +117,8 @@ class ReversalGuard:
                 if entry_price > 0 and current_price > 0:
                     profit_pct = ((current_price - entry_price) / entry_price * 100.0) if side == "long" else ((entry_price - current_price) / entry_price * 100.0)
                     lowest_pct = float(pos.get("lowest_profit_pct", 0.0))
-                    rebound_peak_pct = float(pos.get("rebound_peak_pct", lowest_pct))
+                    raw_rebound = pos.get("rebound_peak_pct")
+                    rebound_peak_pct = float(raw_rebound) if raw_rebound is not None else lowest_pct
                     
                     min_drawdown = getattr(config, "BOUNCE_FAILURE_MIN_DRAWDOWN_PERCENT", -0.75)
                     min_rebound = getattr(config, "BOUNCE_FAILURE_MIN_REBOUND_PERCENT", 0.35)
@@ -125,50 +126,58 @@ class ReversalGuard:
                     max_loss = getattr(config, "BOUNCE_FAILURE_MAX_LOSS_PERCENT", -0.85)
                     
                     # Kondisi Dead-Cat Bounce yang Valid:
-                    # 1. Pernah mengalami drawdown signifikan (lowest_pct <= min_drawdown)
-                    # 2. Harus ada rebound nyata: rebound_peak_pct harus dicatat setelah drawdown (bukan nilai default 0.0)
-                    had_significant_drawdown = (lowest_pct <= min_drawdown)
-                    
-                    # Validasi apakah rebound_peak_pct benar-benar terjadi setelah drawdown
-                    has_real_rebound_data = ("rebound_peak_pct" in pos) and (rebound_peak_pct > lowest_pct)
+                    # 1. Pernah mengalami drawdown minimal (lowest_pct <= min_drawdown)
+                    # 2. PENTING: Harga WAJIB sudah pernah menguji / menembus batas lantai EMA 55 (Safe Pocket Protection)
+                    #    Jika harga masih bermain aman di atas lantai EMA 55 (seperti TRB), rem TIDAK BOLEH memotong prematur!
+                    require_ema55_test = getattr(config, "BOUNCE_FAILURE_REQUIRE_EMA55_TEST", True)
+                    has_tested_ema55 = True
+                    if require_ema55_test and hasattr(self, "signal_engine") and hasattr(self.signal_engine, "get_ema55"):
+                        ema_55 = self.signal_engine.get_ema55(symbol)
+                        if ema_55 and ema_55 > 0:
+                            buffer_pct = getattr(config, "BOUNCE_FAILURE_EMA_BUFFER_PERCENT", 
+                                                 getattr(config, "REVERSAL_EMA_BREAKDOWN_BUFFER_PERCENT", 0.52)) / 100.0
+                            if side == "long":
+                                floor_price = ema_55 * (1.0 - buffer_pct)
+                                lowest_price = entry_price * (1.0 + lowest_pct / 100.0)
+                                has_tested_ema55 = (lowest_price <= floor_price) or (current_price <= floor_price)
+                                if not has_tested_ema55:
+                                    logger.debug(
+                                        f"🛡️ Bounce Failure Guard skip untuk {symbol}: Harga ({current_price:.4f}, low {lowest_price:.4f}) "
+                                        f"masih di atas batas lantai EMA 55 ({floor_price:.4f}, ema55 {ema_55:.4f}). Safe pocket!"
+                                    )
+                            else:
+                                ceiling_price = ema_55 * (1.0 + buffer_pct)
+                                highest_price = entry_price * (1.0 - lowest_pct / 100.0)
+                                has_tested_ema55 = (highest_price >= ceiling_price) or (current_price >= ceiling_price)
+                                if not has_tested_ema55:
+                                    logger.debug(
+                                        f"🛡️ Bounce Failure Guard skip untuk {symbol}: Harga ({current_price:.4f}, high {highest_price:.4f}) "
+                                        f"masih di bawah batas atap EMA 55 ({ceiling_price:.4f}, ema55 {ema_55:.4f}). Safe pocket!"
+                                    )
+
+                    had_significant_drawdown = (lowest_pct <= min_drawdown) and has_tested_ema55
+                    has_real_rebound_data = (raw_rebound is not None) and (rebound_peak_pct > lowest_pct)
                     rebound_height = (rebound_peak_pct - lowest_pct) if has_real_rebound_data else 0.0
                     had_rebound = has_real_rebound_data and (rebound_height >= min_rebound)
                     lost_momentum = had_rebound and (rebound_peak_pct - profit_pct >= slip_tol) and (profit_pct < 0)
                     is_dead_cat_bounce = had_significant_drawdown and had_rebound and lost_momentum
                     
                     if is_dead_cat_bounce:
-                        # Verifikasi Volume 1m: Jangan tebas jika volume sepi (koreksi wajar / gojekan jarum)
-                        # Tebas HANYA jika terkonfirmasi volume sell di 1m >= 1.8x rata-rata (ada buang barang nyata)
-                        is_volume_dumping = True
-                        try:
-                            c_1m = self.order_mgr.exchange.fetch_ohlcv(symbol, "1m", limit=10)
-                            if c_1m and len(c_1m) >= 6:
-                                last_v = c_1m[-1][5]
-                                h_v = [c[5] for c in c_1m[-6:-1]]
-                                avg_v = sum(h_v) / len(h_v) if h_v else 1.0
-                                rvol = last_v / avg_v if avg_v > 0 else 1.0
-                                if rvol < 1.8:
-                                    is_volume_dumping = False
-                                    logger.info(
-                                        f"🛡️ Dead-Cat Bounce sinyal terdeteksi pada {symbol}, TETAPI Volume 1m sepi ({rvol:.2f}x < 1.8x). "
-                                        f"Indikasi koreksi wajar tanpa buangan bandar. Posisi dipertahankan!"
-                                    )
-                        except Exception as e_v:
-                            logger.debug(f"Volume check skip: {e_v}")
-
-                        if is_volume_dumping:
-                            cut_cause = "dead_cat_bounce_rejection"
-                            logger.warning(
-                                f"🛑 BOUNCE FAILURE GUARD CONFIRMED ({cut_cause}) for {symbol}! "
-                                f"Profit: {profit_pct:.2f}% | Drawdown: {lowest_pct:.2f}% | Rebound Peak: {rebound_peak_pct:.2f}%"
-                            )
-                            self.trailing_mgr.remove_stop(symbol)
-                            close_result = self.order_mgr.close_position(
-                                symbol=symbol,
-                                side=side,
-                                amount=pos["amount"],
-                                reason=f"bounce_failure_guard: {cut_cause} ({profit_pct:.2f}%)",
-                            )
+                        # EKSEKUSI DEAD-CAT BOUNCE INSTAN (Meminimalisir Kerugian):
+                        # Jika koin sudah terbukti mantul lalu berbalik melorot kembali,
+                        # TIDAK PERLU tunggu volume meledak! Langsung tebas saat itu juga sebelum merosot ke dasar jurang!
+                        cut_cause = "dead_cat_bounce_rejection"
+                        logger.warning(
+                            f"🛑 BOUNCE FAILURE GUARD CONFIRMED ({cut_cause}) for {symbol}! "
+                            f"Profit: {profit_pct:.2f}% | Drawdown: {lowest_pct:.2f}% | Rebound Peak: {rebound_peak_pct:.2f}% -> Meminimalisir kerugian!"
+                        )
+                        self.trailing_mgr.remove_stop(symbol)
+                        close_result = self.order_mgr.close_position(
+                            symbol=symbol,
+                            side=side,
+                            amount=pos["amount"],
+                            reason=f"bounce_failure_guard: {cut_cause} ({profit_pct:.2f}%)",
+                        )
                         if close_result:
                             result["action"] = "closed"
                             result["reason"] = f"bounce_failure_guard_{cut_cause}"
@@ -179,7 +188,7 @@ class ReversalGuard:
                             }
                             logger.info(
                                 f"🔴 Position CLOSED by Bounce Failure Guard | "
-                                f"Modal diselamatkan dari jurang di profit {profit_pct:.2f}%"
+                                f"Kerugian diminimalisir di profit {profit_pct:.2f}% sebelum merosot lebih dalam!"
                             )
                             return result
 

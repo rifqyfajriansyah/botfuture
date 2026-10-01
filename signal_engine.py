@@ -66,9 +66,11 @@ class SignalEngine:
         else:
             df["ema_200"] = df["ema_55"]
         
-        # RSI & ATR
+        # RSI, ATR, & ADX
         df["rsi"] = ta_lib.momentum.rsi(df["close"], window=config.RSI_PERIOD)
         df["atr"] = ta_lib.volatility.average_true_range(df["high"], df["low"], df["close"], window=14)
+        adx_period = getattr(config, "ADX_PERIOD", 14)
+        df["adx"] = ta_lib.trend.adx(df["high"], df["low"], df["close"], window=adx_period)
         
         # Volume SMA
         df["vol_sma"] = ta_lib.trend.sma_indicator(df["volume"], window=config.VOLUME_SMA_PERIOD)
@@ -229,6 +231,27 @@ class SignalEngine:
         self._get_btc_bias()
         return getattr(self, "_cached_btc_rsi_15m", 50.0)
 
+    def get_ema55(self, symbol):
+        """Ambil nilai EMA 55 terkini untuk symbol (dengan cache 15 detik)."""
+        now = time.time()
+        cache_key = f"ema55_{symbol}"
+        if not hasattr(self, "_ema55_cache"):
+            self._ema55_cache = {}
+        cached = self._ema55_cache.get(cache_key)
+        if cached and (now - cached["time"] < 15):
+            return cached["value"]
+        
+        try:
+            df = self.fetch_candles(symbol, config.TRADING_TIMEFRAME, limit=60)
+            if not df.empty and len(df) >= 55:
+                df = self.calculate_indicators(df)
+                val = float(df.iloc[-1].get("ema_55", 0.0))
+                self._ema55_cache[cache_key] = {"value": val, "time": now}
+                return val
+        except Exception as e:
+            logger.debug(f"Error fetching ema_55 for {symbol}: {e}")
+        return 0.0
+
     def _check_pullback_long(self, df_15m):
         """
         Evaluasi pola Pullback & Bounce untuk sinyal LONG pada 15m.
@@ -249,6 +272,8 @@ class SignalEngine:
         # 1. 15m Trend Alignment: EMA 21 harus di atas atau memotong EMA 55
         if ema_21 < ema_55 * 0.998:
             return False, 0, {"reason": "15m_ema_not_bullish"}
+            
+        vol_ratio = vol / vol_sma if vol_sma > 0 else 1.0
             
         # 2. Anti-Climax Overbought Filter: Jangan beli jika dalam 8 candle terakhir (2 jam) baru saja meletup overbought
         lookback_climax = getattr(config, "ANTI_CLIMAX_LOOKBACK_CANDLES", 8)
@@ -341,6 +366,8 @@ class SignalEngine:
         # 1. 15m Trend Alignment: EMA 21 harus di bawah atau memotong EMA 55
         if ema_21 > ema_55 * 1.002:
             return False, 0, {"reason": "15m_ema_not_bearish"}
+            
+        vol_ratio = vol / vol_sma if vol_sma > 0 else 1.0
             
         # 2. Anti-Climax Oversold Filter: Jangan short jika dalam 8 candle terakhir baru saja meletup oversold
         lookback_climax = getattr(config, "ANTI_CLIMAX_LOOKBACK_CANDLES", 8)
@@ -457,17 +484,14 @@ class SignalEngine:
                 now = time.time()
                 is_flash_locked = (now < self._flash_lock_until)
                 btc_rsi_15m = self._get_btc_rsi_15m()
+                btc_15m_pct = getattr(self, "_cached_btc_15m_pct", 0.0)
                 
-                # Traffic Light RSI 15m BTC (Lantai Dasar & Pucuk Guard)
-                btc_rsi_oversold = getattr(config, "BTC_CHOP_RSI_OVERSOLD", 38.0)
-                btc_rsi_overbought = getattr(config, "BTC_CHOP_RSI_OVERBOUGHT", 65.0)
-                
-                if can_short and btc_rsi_15m < btc_rsi_oversold:
-                    logger.info(f"🚫 SHORT {symbol} diblokir: RSI 15m BTC ({btc_rsi_15m:.1f}) di lantai dasar (< {btc_rsi_oversold})! Anti-short saat rawan dead-cat bounce.")
+                # Anti-Suicide Guard (Simetris & Selaras Tren BTC):
+                # 1. Dilarang keras SHORT saat BTC 15m sedang lonjak naik kencang (Anti-suicide pump)
+                if can_short and (btc_15m_pct >= 0.25 or btc_rsi_15m > 60.0):
                     can_short = False
-                    
-                if can_long and btc_rsi_15m > btc_rsi_overbought:
-                    logger.info(f"🚫 LONG {symbol} diblokir: RSI 15m BTC ({btc_rsi_15m:.1f}) di pucuk jenuh (> {btc_rsi_overbought})! Anti-buy saat rawan koreksi.")
+                # 2. Dilarang keras LONG saat BTC 15m sedang terjun payung (Anti tangkap pisau jatuh)
+                if can_long and (btc_15m_pct <= -0.25 or btc_rsi_15m < 38.0):
                     can_long = False
                 
                 if btc_mode == "smart":
@@ -729,7 +753,7 @@ class SignalEngine:
                     prev["close"] < (prev_ema55 * (1.0 - buffer_pct)) and
                     prev_ema55 > 0
                 )
-                is_solid_breakdown = close < (ema_55 * (1.0 - solid_break_pct)) and ema_55 > 0
+                is_solid_breakdown = (not in_grace_period) and (close < (ema_55 * (1.0 - solid_break_pct))) and ema_55 > 0
                 is_dead_cross = (not in_grace_period) and (ema_21 < ema_55 and prev.get("ema_21", 0) >= prev.get("ema_55", 0))
                 
                 # Tekanan makro melawan posisi LONG:
@@ -780,7 +804,7 @@ class SignalEngine:
                     prev["close"] > (prev_ema55 * (1.0 + buffer_pct)) and
                     prev_ema55 > 0
                 )
-                is_solid_breakout = close > (ema_55 * (1.0 + solid_break_pct)) and ema_55 > 0
+                is_solid_breakout = (not in_grace_period) and (close > (ema_55 * (1.0 + solid_break_pct))) and ema_55 > 0
                 is_golden_cross = (not in_grace_period) and (ema_21 > ema_55 and prev.get("ema_21", 0) <= prev.get("ema_55", 0))
                 
                 # Tekanan makro melawan posisi SHORT:

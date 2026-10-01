@@ -120,15 +120,17 @@ class TrailingManager:
         """Hitung checkpoint 1, stop level 1, dan offset pengawalan dinamis berdasarkan ATR koin."""
         atr_pct = self._get_symbol_atr_pct(symbol)
         
-        # 1. Checkpoint 1
-        cp1_ratio = getattr(config, "TRAILING_FIRST_CHECKPOINT_ATR_RATIO", 1.8)
-        cp1_min = getattr(config, "TRAILING_FIRST_CHECKPOINT_MIN_PERCENT", 1.45)
-        first_cp = round(max(cp1_min, atr_pct * cp1_ratio), 2)
+        # 1. Checkpoint 1 (Dibatasi plafon maksimal agar koin liar tidak molor)
+        cp1_ratio = getattr(config, "TRAILING_FIRST_CHECKPOINT_ATR_RATIO", 1.4)
+        cp1_min = getattr(config, "TRAILING_FIRST_CHECKPOINT_MIN_PERCENT", 1.30)
+        cp1_max = getattr(config, "TRAILING_FIRST_CHECKPOINT_MAX_PERCENT", 1.65)
+        first_cp = round(max(cp1_min, min(cp1_max, atr_pct * cp1_ratio)), 2)
         
         # 2. Stop Level 1
-        stop1_ratio = getattr(config, "TRAILING_FIRST_STOP_ATR_RATIO", 0.85)
-        stop1_min = getattr(config, "TRAILING_FIRST_STOP_MIN_PERCENT", 0.70)
-        first_stop = round(max(stop1_min, atr_pct * stop1_ratio), 2)
+        stop1_ratio = getattr(config, "TRAILING_FIRST_STOP_ATR_RATIO", 0.80)
+        stop1_min = getattr(config, "TRAILING_FIRST_STOP_MIN_PERCENT", 0.65)
+        stop1_max = getattr(config, "TRAILING_FIRST_STOP_MAX_PERCENT", 0.90)
+        first_stop = round(max(stop1_min, min(stop1_max, atr_pct * stop1_ratio)), 2)
         
         # 3. Trailing Offset (Ruang napas)
         offset_ratio = getattr(config, "TRAILING_STOP_OFFSET_ATR_RATIO", 0.85)
@@ -222,8 +224,33 @@ class TrailingManager:
                 )
                 result["action"] = "stop_triggered"
                 return result
-        
-        # 2b. PARTIAL TAKE PROFIT (Target Dinamis ATR ATAU Stall Guard "Bensin Habis" di Tengah Jalan)
+                
+        # 2a. MID-RANGE PROFIT GUARD (Pengaman Area 0.0% s/d +0.80%)
+        # Koin di bawah +0.50% bebas bernapas. Tapi jika sudah pernah naik >= +0.55% lalu melorot ke BEP (+0.08%), kunci modal!
+        if getattr(config, "MID_RANGE_GUARD_ENABLED", True):
+            highest_so_far = float(pos.get("highest_profit_pct", 0.0))
+            mid_trigger = getattr(config, "MID_RANGE_TRIGGER_PROFIT", 0.55)
+            mid_lock = getattr(config, "MID_RANGE_LOCK_PROFIT", 0.08)
+            
+            if highest_so_far >= mid_trigger and profit_pct <= mid_lock:
+                logger.warning(
+                    f"🛡️ MID-RANGE GUARD TRIGGERED for {symbol}! "
+                    f"Koin sempat naik tinggi ke {highest_so_far:+.2f}%, tapi kehilangan momentum dan melorot ke {profit_pct:+.2f}%. "
+                    f"Menutup posisi di batas BEP aman ({mid_lock:+.2f}%) untuk mengunci modal utuh!"
+                )
+                self.remove_stop(symbol)
+                close_res = self.order_mgr.close_position(
+                    symbol=symbol,
+                    side=side,
+                    amount=pos.get("amount", amount),
+                    reason=f"mid_range_guard ({profit_pct:.2f}%)"
+                )
+                if close_res:
+                    result["action"] = "closed"
+                    result["reason"] = "mid_range_guard"
+                    result["profit_pct"] = profit_pct
+                    return result
+
         if getattr(config, "PARTIAL_TP_ENABLED", True) and not pos.get("partial_tp_done", False):
             # Target TP Dinamis Adaptif ATR koin
             tp_target_pct = self.get_dynamic_tp_target(symbol)

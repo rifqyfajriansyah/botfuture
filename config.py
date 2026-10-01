@@ -28,7 +28,7 @@ MIN_WALLET_BALANCE_USDT = 5.0   # Saldo minimum untuk bot mulai trading
 # =============================================================================
 # COOLDOWN & ANTI-REENTRY SETTINGS
 # =============================================================================
-SIGNAL_COOLDOWN_MINUTES = 5             # Cooldown global 5 menit setelah trade selesai (cepat siap cari peluang baru)
+SIGNAL_COOLDOWN_MINUTES = 10             # Cooldown global 5 menit setelah trade selesai (cepat siap cari peluang baru)
 FIXED_COOLDOWN_ENABLED = True           # Kalah maupun menang delay tetap fixed 5 menit (tidak ada penalti jeda lama)
 SYMBOL_COOLDOWN_MINUTES = 60            # Cooldown khusus koin yang sama jika trade selesai (60 menit anti-revenge koin serupa)
 TIMEOUT_COOLDOWN_MINUTES = 1            # Cooldown global jika limit order cancel/timeout (hanya 1m sebelum scan koin lain)
@@ -41,7 +41,7 @@ CONSECUTIVE_LOSS_PAUSE_MINUTES = 60
 # ENTRY RISK GATEKEEPER (Anti-Pucuk & Filter Kualitas Sinyal)
 # =============================================================================
 MIN_ENTRY_REJECTION_WICK_PERCENT = 22.0     # Wajib ada jarum penolakan minimal 22% (momentum kuat seringkali wick 20-25%)
-MAX_ENTRY_RISK_EMA55_PERCENT = 0.88         # Maksimal jarak harga entry ke support EMA 55 hanya 0.88% (anti resiko tebal, cutloss kecil)
+MAX_ENTRY_RISK_EMA55_PERCENT = 1.35         # Maksimal jarak harga entry ke support EMA 55 hanya 0.88% (anti resiko tebal, cutloss kecil)
 ANTI_CLIMAX_LOOKBACK_CANDLES = 8            # Pantau 8 candle terakhir (2 jam)
 ANTI_CLIMAX_MAX_RSI = 70.0                  # Dilarang masuk LONG jika dalam 2 jam terakhir baru saja overbought > 70
 ANTI_CLIMAX_MIN_RSI = 30.0                  # Dilarang masuk SHORT jika dalam 2 jam terakhir baru saja oversold < 30
@@ -52,17 +52,18 @@ BTC_FLASH_LOCK_MINUTES = 15                 # Kunci proteksi flash dump/pump sel
 BTC_FILTER_MODE = "smart"                   # 'smart': Izinkan altcoin kuat (HTF selaras) saat BTC tenang/sideways, blokir mutlak saat BTC flash dump/pump aktif
 STRICT_HTF_REQUIRED = False                 # Izinkan koin decoupling yang punya tren 1H kuat
 
-# ENTRY 2.0 (BTC TRAFFIC LIGHT & REGIME CONFLUENCE)
-BTC_CHOP_RSI_OVERSOLD = 38.0                # Jangan buka SHORT jika RSI 15m BTC < 38 (lantai dasar lembah, rawan dead-cat bounce)
+# ENTRY 2.0 (BTC TRAFFIC LIGHT & REGIME CONFLUENCE - ANTI-GOJEK KETAT)
+BTC_CHOP_RSI_OVERSOLD = 42.0                # Jangan buka SHORT jika RSI 15m BTC < 42 (zona bawah rawan rebound dead-cat bounce)
+BTC_CHOP_RSI_CRASH_FLOOR = 40.0             # DILARANG KERAS BUKA LONG jika RSI 15m BTC < 40 (pasar dingin/sedang dump parah)
 BTC_CHOP_RSI_OVERBOUGHT = 65.0              # Jangan buka LONG jika RSI 15m BTC > 65 (pucuk jenuh, rawan profit-taking)
-ANOMALY_MIN_SCORE = 85                      # Skor sinyal wajib >= 85 (Grade A+) untuk boleh decoupling lawan arus BTC
-ANOMALY_MIN_VOL_RATIO = 1.45                # Volume wajib >= 1.45x SMA 20 (Smart Money nyata) untuk boleh lawan arus BTC
-ENTRY_MIN_VOLUME_RATIO = 1.15               # Volume standar minimal lilin entry >= 1.15x SMA 20 (anti-candle sepi/loyo)
+ANOMALY_MIN_SCORE = 90                      # Skor sinyal wajib >= 90 (Grade S) untuk boleh decoupling lawan arus BTC
+ANOMALY_MIN_VOL_RATIO = 1.60                # Volume wajib >= 1.60x SMA 20 (Smart Money nyata) untuk boleh lawan arus BTC
+ENTRY_MIN_VOLUME_RATIO = 0.80               # Volume standar minimal lilin entry >= 1.20x SMA 20 (hanya candle bervolume kuat)
 
-REVERSAL_SOLID_BREAKDOWN_PERCENT = 0.78      # Batas darurat solid mutlak dirapatkan ke 0.78% (dari 1.08%, non-round number) agar minus mini
+REVERSAL_SOLID_BREAKDOWN_PERCENT = 1.50      # Batas darurat solid mutlak dirapatkan ke 0.78% (dari 1.08%, non-round number) agar minus mini
 REVERSAL_DUMP_FAST_CUT_THRESHOLD_PERCENT = 0.54 # Tebas cepat jika harga >= 0.54% di bawah EMA 55 saat ada sinyal dump
 REVERSAL_EMA_BREAKDOWN_BUFFER_PERCENT = 0.52 # Toleransi candle closed wajib minimal 0.52% di bawah/atas EMA 55
-REVERSAL_GRACE_PERIOD_MINUTES = 7           # Ruang napas normal 7 menit (dari 15m, lilin 15m matang di menit ke-7)
+REVERSAL_GRACE_PERIOD_MINUTES = 12           # Ruang napas normal 7 menit (dari 15m, lilin 15m matang di menit ke-7)
 REVERSAL_DUMP_FAST_CUT_ENABLED = True       # Jika di bawah EMA 55 >= 0.54% (LONG) dan terjadi BTC/Market dump, tebas instan!
 
 # MACRO PRESSURE FAST CUT (BTC & BTCDOM ADVERSE SHIELD - OPSI A)
@@ -104,14 +105,16 @@ PARTIAL_TP_PERCENT = 2.42            # Fallback statis jika data ATR tidak terse
 
 # 2. FLEXIBLE TRAILING PROFIT RATCHET (Tangga Pengawalan Adaptif)
 DYNAMIC_TRAILING_ENABLED = True
-TRAILING_FIRST_CHECKPOINT_ATR_RATIO = 1.8  # Checkpoint 1 aktif di 1.8x ATR koin
-TRAILING_FIRST_CHECKPOINT_MIN_PERCENT = 1.45 # Minimal Checkpoint 1 aktif di +1.45%
-TRAILING_FIRST_STOP_ATR_RATIO = 0.85       # Kunci stop loss pertama di 0.85x ATR
-TRAILING_FIRST_STOP_MIN_PERCENT = 0.70     # Minimal stop loss terkunci di +0.70%
-TRAILING_STOP_OFFSET_ATR_RATIO = 0.85      # Jarak kawal stop 0.85x ATR koin (ruang napas lega)
-TRAILING_STOP_OFFSET_MIN = 0.70            # Minimal jarak stop 0.70% (anti kejilat spread)
-TRAILING_STOP_OFFSET_MAX = 1.20            # Maksimal jarak stop 1.20% (agar cuan terjaga)
-TRAILING_CHECKPOINT_STEP = 0.50            # Step checkpoint bertingkat berikutnya (+0.50%)
+TRAILING_FIRST_CHECKPOINT_ATR_RATIO = 1.4  # Checkpoint 1 aktif lebih cepat (1.4x ATR koin)
+TRAILING_FIRST_CHECKPOINT_MIN_PERCENT = 1.30 # Minimal Checkpoint 1 aktif di +1.30%
+TRAILING_FIRST_CHECKPOINT_MAX_PERCENT = 1.65 # PLAFON MAKSIMAL: Koin seliar apapun WAJIB aktif di +1.65%!
+TRAILING_FIRST_STOP_ATR_RATIO = 0.80       # Kunci stop loss pertama di 0.80x ATR
+TRAILING_FIRST_STOP_MIN_PERCENT = 0.65     # Minimal stop loss terkunci di +0.65%
+TRAILING_FIRST_STOP_MAX_PERCENT = 0.90     # Plafon stop 1 di +0.90%
+TRAILING_STOP_OFFSET_ATR_RATIO = 0.80      # Jarak kawal stop 0.80x ATR koin (ruang napas lega)
+TRAILING_STOP_OFFSET_MIN = 0.65            # Minimal jarak stop 0.65% (anti kejilat spread)
+TRAILING_STOP_OFFSET_MAX = 1.00            # Maksimal jarak stop 1.00% (agar cuan terjaga)
+TRAILING_CHECKPOINT_STEP = 0.40            # Step checkpoint bertingkat berikutnya (+0.40% cepat naik)
 
 # Fallback statis trailing (jika ATR tidak tersedia)
 TRAILING_FIRST_CHECKPOINT_PERCENT = 1.65    # Checkpoint 1 fallback di +1.65%
@@ -135,6 +138,19 @@ STALL_GUARD_AGED_PULLBACK_PERCENT = 0.32
 STALL_GUARD_AGED_MIN_EXIT_PROFIT = 0.60
 
 # =============================================================================
+# 3b. MID-RANGE PROFIT GUARD (PENGAMAN AREA 0.0% s/d +0.80%)
+# =============================================================================
+# Filosofi:
+# - Di bawah +0.50%: Koin bebas bergerak dan bernapas tanpa diganggu.
+# - Jika sudah terbang masuk zona menengah (>= +0.55% s/d +0.60% / cuan ~$4):
+#   Koin terbukti punya momentum, tapi belum sampai ke radar BEP statis (+0.80%).
+# - Jika dari puncak tersebut koin melorot kembali ke pintu modal (profit <= +0.10% / BEP cover fee):
+#   Bot mengamankan posisi agar modal selamat dan tidak berbalik menjadi kerugian tekor!
+MID_RANGE_GUARD_ENABLED = True
+MID_RANGE_TRIGGER_PROFIT = 0.55             # Aktif HANYA jika koin sudah pernah naik minimal +0.55% (cuan ~$3.8+)
+MID_RANGE_LOCK_PROFIT = 0.08                # Batas aman di BEP tipis (+0.08% cover fee Binance, modal utuh)
+
+# =============================================================================
 # TIME-PROGRESSIVE BEP (OPSI A: SATPAM KOIN LEMOT / SIDEWAYS)
 # =============================================================================
 # Filosofi Opsi A:
@@ -142,7 +158,7 @@ STALL_GUARD_AGED_MIN_EXIT_PROFIT = 0.60
 # - Trailing Waktu HANYA MENGAWAL koin loyo yang sudah jalan >= 2 jam (120m) dan profit < 1.2%,
 #   dengan memasang stop di BEP murni (+0.18% cover fee) agar modal tidak tersandera selamanya.
 TIME_PROGRESSIVE_LOCK_ENABLED = True
-TIME_PROGRESSIVE_MINUTES = 120              # 2 Jam: waktu matang untuk mengecek koin loyo
+TIME_PROGRESSIVE_MINUTES = 75              # 75 Menit (5 lilin 15m): batas waktu koin matang / loyo
 TIME_PROGRESSIVE_STAGNANT_MAX_PROFIT = 1.2  # Koin yang stagnan/loyo di bawah +1.2%
 TIME_PROGRESSIVE_MIN_BREATHING_ROOM_PERCENT = 1.0 # Buffer napas minimal 1.0% dari harga live
 
@@ -179,7 +195,9 @@ MAX_STAGNANT_MIN_PROFIT_PERCENT = 0.2
 # - Jika setelah mantul harga gagal tembus entry (tertahan resisten) dan mulai melorot kembali,
 #   bot langsung tebas potong rugi saat itu juga sebelum minusnya membengkak kembali ke dasar jurang!
 BOUNCE_FAILURE_GUARD_ENABLED = True
-BOUNCE_FAILURE_MIN_DRAWDOWN_PERCENT = -0.75  # Pernah mengalami drawdown minimal -0.75% harga (ROE -2.25%)
+BOUNCE_FAILURE_REQUIRE_EMA55_TEST = True     # Rem hanya aktif jika harga sudah menguji/menusuk ke batas lantai EMA 55 (Safe Pocket)
+BOUNCE_FAILURE_EMA_BUFFER_PERCENT = 0.52     # Toleransi buffer lantai EMA 55 (0.52% di bawah/atas EMA 55)
+BOUNCE_FAILURE_MIN_DRAWDOWN_PERCENT = -0.75  # Drawdown minimal terhadap entry untuk konfirmasi dip nyata
 BOUNCE_FAILURE_MIN_REBOUND_PERCENT = 0.35    # Sempat berhasil mantul naik minimal +0.35% harga dari dasar jurang
 BOUNCE_FAILURE_SLIPPAGE_TOLERANCE = 0.25     # Jika setelah mantul harga melorot kembali >= 0.25% dari puncak pantulan -> TEBAS!
 
@@ -214,7 +232,7 @@ EMERGENCY_SL_PERCENT = 25.0         # Pasang di -25% (sebelum likuidasi leverage
 # =============================================================================
 # SIGNAL ENGINE SETTINGS (Institutional TPLR)
 # =============================================================================
-SIGNAL_MIN_SCORE = 70           # Skor minimum sinyal untuk entry (Grade A & A- masuk)
+SIGNAL_MIN_SCORE = 70           # Skor minimum sinyal untuk entry (Hanya Grade A & A+ super kuat yang boleh masuk!)
 
 # EMA Parameters
 EMA_FAST = 21
@@ -235,11 +253,13 @@ RSI_REVERSAL_LOW = 25
 
 # ADX Parameters
 ADX_PERIOD = 14
-ADX_THRESHOLD = 25
+ADX_THRESHOLD = 20.0            # Wajib ADX >= 20 jika volume normal (< 1.5x)
+ADX_BREAKOUT_THRESHOLD = 14.0   # Toleransi ADX >= 14 jika ada volume ledakan raksasa (>= 1.5x)
+ADX_BREAKOUT_VOL_RATIO = 1.50   # Batas volume ledakan untuk aktivasi toleransi awal
 
 # Volume
 VOLUME_SMA_PERIOD = 20
-MIN_VOLUME_RATIO = 1.15         # Minimal volume 1.15x dari average 20 SMA (Smart Money validasi)
+MIN_VOLUME_RATIO = 0.80         # Minimal volume 1.15x dari average 20 SMA (Smart Money validasi)
 
 # Timeframes & Confirmation
 TRADING_TIMEFRAME = "15m"       # Timeframe utama (15m cepat & responsif)
@@ -272,7 +292,9 @@ BLACKLIST_COINS = [
     # High-volatility political memecoins / High-risk wicks
     "TRUMP/USDT", "TRUMP",
 
-    # TradFi Perpetuals & Stock Perps (Bukan Crypto Asli)
+    # TradFi Perpetuals & Gold/Commodity Perps (Emas / Bukan Crypto Asli)
+    "PAXG/USDT", "PAXG",
+    "XAUT/USDT", "XAUT",
     "AAOI/USDT", "AAOI",
     "SOXS/USDT", "SOXS",
     "DRAM/USDT", "DRAM",
@@ -290,17 +312,18 @@ BLACKLIST_COINS = [
 ]
 
 # =============================================================================
-# SMART EXHAUSTION / CLIMAX EXIT (Puncak & Lembah Guard)
+# SMART EXHAUSTION / CLIMAX EXIT (Puncak & Lembah Guard - Super Climax)
 # =============================================================================
 EXHAUSTION_EXIT_ENABLED = True             # Aktifkan deteksi titik pucuk / klimaks
-EXHAUSTION_MIN_PROFIT_PERCENT = 1.8        # Minimal profit +1.8% (ROE ~5.4% di 3x | ~$8.1 USDT) untuk aktifkan radar pucuk jarum
-EXHAUSTION_RSI_OVERBOUGHT = 73.0           # RSI overbought ekstrem untuk LONG
-EXHAUSTION_RSI_OVERSOLD = 27.0             # RSI oversold ekstrem untuk SHORT
-EXHAUSTION_WICK_PERCENT = 32.0             # Rejection wick minimal 32% (standar 1/3 candle)
-EXHAUSTION_EMA_DIST_PERCENT = 2.0          # Jarak harga dari EMA 21 minimal 2.0% (overextended)
-EXHAUSTION_PULLBACK_PERCENT = 0.4          # Penurunan dari high candle minimal 0.4% (tanda mulai melorot)
+EXHAUSTION_MIN_PROFIT_PERCENT = 3.2        # Minimal profit +3.2% (ROE ~9.6% di 3x | ~$14.4 USDT) baru boleh cari pucuk!
+EXHAUSTION_RSI_OVERBOUGHT = 76.0           # RSI overbought ekstrem untuk LONG
+EXHAUSTION_RSI_OVERSOLD = 24.0             # RSI oversold ekstrem untuk SHORT
+EXHAUSTION_WICK_PERCENT = 35.0             # Rejection wick minimal 35% (jarum pembalikan nyata)
+EXHAUSTION_EMA_DIST_PERCENT = 2.2          # Jarak harga dari EMA 21 minimal 2.2% (overextended)
+EXHAUSTION_PULLBACK_PERCENT = 0.65         # Penurunan/pantulan minimal 0.65% (bukan nafas tipis)
 EXHAUSTION_VOLUME_RATIO = 1.8              # Volume minimal 1.8x dari SMA 20
 EXHAUSTION_MIN_CONFLUENCE = 2              # Minimal 2 dari kriteria exhaustion terpenuhi
+
 
 # =============================================================================
 # REVERSAL GUARD
@@ -329,3 +352,10 @@ STATE_FILE = "bot_state.json"
 # =============================================================================
 MAIN_LOOP_INTERVAL = 10         # Sleep 10 detik antar iterasi
 CANDLE_FETCH_LIMIT = 250        # Jumlah candle yang di-fetch untuk analisis
+
+# =============================================================================
+# PRE-FILL WATCHDOG (Auto-Abort Antrian Limit Order jika Pasar Berbalik)
+# =============================================================================
+PRE_FILL_WATCHDOG_ENABLED = True
+PRE_FILL_MAX_ADVERSE_DRIFT_PERCENT = 0.35   # Batalkan jika harga market lari >= 0.35% melawan arah order saat antri
+PRE_FILL_CHECK_BTC_REVERSAL = True          # Batalkan jika arah BTC mendadak berbalik arah saat antri

@@ -176,6 +176,8 @@ class StateManager:
             "order_id": order_id,
             "entry_time": datetime.now().isoformat(),
             "highest_profit_pct": 0.0,
+            "lowest_profit_pct": 0.0,
+            "rebound_peak_pct": None,
         }
         self.state["bot_status"] = "monitoring"
         self.save()
@@ -340,9 +342,40 @@ class StateManager:
         """Ambil seluruh state (untuk dashboard)."""
         return self.state.copy()
     
+    def get_highest_profit(self):
+        """Ambil highest profit yang pernah dicapai posisi aktif."""
+        pos = self.state.get("active_position")
+        if pos:
+            return float(pos.get("highest_profit_pct", 0.0))
+        return 0.0
+
+    def update_profit_extremes(self, profit_pct):
+        """Update highest, lowest drawdown, dan rebound peak dari posisi ini."""
+        pos = self.state.get("active_position")
+        if not pos:
+            return
+        
+        changed = False
+        if profit_pct > pos.get("highest_profit_pct", 0.0):
+            pos["highest_profit_pct"] = profit_pct
+            changed = True
+            
+        if profit_pct < pos.get("lowest_profit_pct", 0.0):
+            pos["lowest_profit_pct"] = profit_pct
+            changed = True
+            
+        # Catat rebound peak jika posisi sudah pernah drawdown lalu memantul
+        lowest = float(pos.get("lowest_profit_pct", 0.0))
+        if lowest < -0.30 and profit_pct > lowest:
+            cur_rebound = pos.get("rebound_peak_pct")
+            if cur_rebound is None or profit_pct > float(cur_rebound):
+                pos["rebound_peak_pct"] = profit_pct
+                changed = True
+                
+        if changed:
+            self.save()
+
     def update_highest_profit(self, profit_pct):
         """Update highest profit yang pernah dicapai posisi ini."""
-        pos = self.state["active_position"]
-        if pos and profit_pct > pos.get("highest_profit_pct", 0):
-            pos["highest_profit_pct"] = profit_pct
-            self.save()
+        self.update_profit_extremes(profit_pct)
+
