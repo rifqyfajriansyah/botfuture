@@ -15,6 +15,8 @@ Mekanisme:
 
 import time
 from datetime import datetime
+import pandas as pd
+import numpy as np
 import config
 from logger_setup import logger
 
@@ -103,6 +105,65 @@ class TrailingManager:
             
         return 0.85
     
+    def _get_symbol_adx_info(self, symbol):
+        """Hitung ADX 15m, +DI, dan -DI untuk koin (cached 30 detik)."""
+        now = time.time()
+        if not hasattr(self, "_adx_cache"):
+            self._adx_cache = {}
+            
+        cached = self._adx_cache.get(symbol)
+        if cached and (now - cached["ts"]) < 30.0:
+            return cached["data"]
+            
+        try:
+            ohlcv = self.order_mgr.exchange.fetch_ohlcv(symbol, "15m", limit=35)
+            if not ohlcv or len(ohlcv) < 20:
+                return {"adx": 25.0, "plus_di": 20.0, "minus_di": 20.0, "is_choppy": False}
+                
+            df = pd.DataFrame(ohlcv, columns=['ts', 'open', 'high', 'low', 'close', 'vol'])
+            
+            df['up_move'] = df['high'] - df['high'].shift(1)
+            df['down_move'] = df['low'].shift(1) - df['low']
+            
+            df['plus_dm'] = np.where((df['up_move'] > df['down_move']) & (df['up_move'] > 0), df['up_move'], 0.0)
+            df['minus_dm'] = np.where((df['down_move'] > df['up_move']) & (df['down_move'] > 0), df['down_move'], 0.0)
+            
+            df['tr1'] = df['high'] - df['low']
+            df['tr2'] = abs(df['high'] - df['close'].shift(1))
+            df['tr3'] = abs(df['low'] - df['close'].shift(1))
+            df['tr'] = df[['tr1', 'tr2', 'tr3']].max(axis=1)
+            
+            period = 14
+            tr_smooth = df['tr'].rolling(window=period).sum()
+            plus_dm_smooth = df['plus_dm'].rolling(window=period).sum()
+            minus_dm_smooth = df['minus_dm'].rolling(window=period).sum()
+            
+            df['plus_di'] = 100 * (plus_dm_smooth / tr_smooth)
+            df['minus_di'] = 100 * (minus_dm_smooth / tr_smooth)
+            
+            df['dx'] = 100 * abs(df['plus_di'] - df['minus_di']) / (df['plus_di'] + df['minus_di'])
+            df['adx'] = df['dx'].rolling(window=period).mean()
+            
+            last = df.iloc[-1]
+            adx_val = float(last.get('adx', 25.0))
+            p_di = float(last.get('plus_di', 20.0))
+            m_di = float(last.get('minus_di', 20.0))
+            
+            thresh = getattr(config, "CHOPPY_ADX_THRESHOLD", 22.0)
+            is_choppy = (adx_val < thresh)
+            
+            data = {
+                "adx": round(adx_val, 2),
+                "plus_di": round(p_di, 2),
+                "minus_di": round(m_di, 2),
+                "is_choppy": is_choppy
+            }
+            self._adx_cache[symbol] = {"ts": now, "data": data}
+            return data
+        except Exception as e:
+            logger.debug(f"Gagal hitung ADX {symbol}: {e}")
+            return {"adx": 25.0, "plus_di": 20.0, "minus_di": 20.0, "is_choppy": False}
+
     def get_dynamic_tp_target(self, symbol):
         """Hitung target partial TP dinamis berdasarkan ATR koin."""
         if not getattr(config, "DYNAMIC_TP_ENABLED", True):
@@ -124,7 +185,15 @@ class TrailingManager:
         cp1_ratio = getattr(config, "TRAILING_FIRST_CHECKPOINT_ATR_RATIO", 1.4)
         cp1_min = getattr(config, "TRAILING_FIRST_CHECKPOINT_MIN_PERCENT", 1.30)
         cp1_max = getattr(config, "TRAILING_FIRST_CHECKPOINT_MAX_PERCENT", 1.65)
-        first_cp = round(max(cp1_min, min(cp1_max, atr_pct * cp1_ratio)), 2)
+        
+        # Penyesuaian Dinamis Mode Choppy vs Gacor (Logika Cerdas User):
+        # Jika koin dalam mode Choppy (ADX < 22), CP1 diturunkan ke +0.95% agar cepat mengamankan uang dapur
+        adx_info = self._get_symbol_adx_info(symbol)
+        if adx_info.get("is_choppy", False) and getattr(config, "CHOPPY_AUTO_BEP_ENABLED", True):
+            cp1_min = getattr(config, "CHOPPY_CP1_PERCENT", 0.95)
+            first_cp = round(max(0.85, min(cp1_max, cp1_min)), 2)
+        else:
+            first_cp = round(max(cp1_min, min(cp1_max, atr_pct * cp1_ratio)), 2)
         
         # 2. Stop Level 1
         stop1_ratio = getattr(config, "TRAILING_FIRST_STOP_ATR_RATIO", 0.80)
@@ -250,6 +319,49 @@ class TrailingManager:
                     result["reason"] = "mid_range_guard"
                     result["profit_pct"] = profit_pct
                     return result
+
+        # 2b. CHOPPY AUTO-BEP LOCK (Logika Cerdas User: Jika Choppy & Sempat Cuan >= +0.55%, Otomatis Gembok BEP)
+        if getattr(config, "CHOPPY_AUTO_BEP_ENABLED", True):
+            adx_info = self._get_symbol_adx_info(symbol)
+            is_adx_choppy = adx_info.get("is_choppy", False)
+            
+            p_di = adx_info.get("plus_di", 20.0)
+            m_di = adx_info.get("minus_di", 20.0)
+            if side == "long":
+                di_misaligned = (m_di > p_di * 1.15)
+            else:
+                di_misaligned = (p_di > m_di * 1.15)
+                
+            is_choppy_regime = is_adx_choppy or di_misaligned
+            bep_trigger = getattr(config, "CHOPPY_BEP_TRIGGER_PERCENT", 0.55)
+            bep_lock = getattr(config, "CHOPPY_BEP_LOCK_PERCENT", 0.12)
+            
+            if is_choppy_regime and profit_pct >= bep_trigger and not pos.get("choppy_bep_locked", False):
+                current_cp = self.state.get_current_checkpoint()
+                if current_cp is None or current_cp < bep_trigger:
+                    bep_stop_price = self.calculate_stop_price(entry_price, bep_lock, side)
+                    if old_stop and old_stop.get("order_id"):
+                        self.order_mgr.cancel_stop_order(symbol, old_stop["order_id"])
+                        
+                    new_stop = self.order_mgr.place_stop_order(
+                        symbol=symbol,
+                        side=side,
+                        amount=pos.get("amount", amount),
+                        stop_price=bep_stop_price
+                    )
+                    if new_stop:
+                        self.state.set_trailing_stop(
+                            stop_order_id=new_stop["id"],
+                            stop_price=bep_stop_price,
+                            checkpoint_level=bep_trigger
+                        )
+                        pos["choppy_bep_locked"] = True
+                        self.state.save()
+                        logger.info(
+                            f"🛡️ CHOPPY AUTO-BEP ACTIVATED for {symbol}! "
+                            f"Profit: +{profit_pct:.2f}% >= +{bep_trigger}% | ADX: {adx_info['adx']:.1f} (+DI: {p_di:.1f}, -DI: {m_di:.1f}) | "
+                            f"Physical Stop Locked @ {bep_stop_price} (+{bep_lock}%). MODAL 100% UTUH BEBAS RESIKO!"
+                        )
 
         if getattr(config, "PARTIAL_TP_ENABLED", True) and not pos.get("partial_tp_done", False):
             # Target TP Dinamis Adaptif ATR koin
@@ -429,6 +541,40 @@ class TrailingManager:
                             result["action"] = "partial_tp"
                             result["stop_price"] = bep_stop_price
                             return result
+
+        # 2c. MOONBAG STAGNATION TIMEOUT (Pengaman Koin Tertidur Pasca-Partial TP)
+        # Jika koin sudah ambil Partial TP (50% sisa jadi Moonbag),
+        # tapi setelah MOONBAG_TIMEOUT_HOURS (3.5 jam) harganya stagnan di bawah +1.5%:
+        # Tutup sisa 100% posisi via Market Order untuk mengunci sisa profit ke kas!
+        if pos.get("partial_tp_done", False) and getattr(config, "MOONBAG_TIMEOUT_ENABLED", True):
+            entry_time_str = pos.get("entry_time")
+            if entry_time_str:
+                try:
+                    entry_dt = datetime.fromisoformat(entry_time_str)
+                    elapsed_hours = (datetime.now() - entry_dt).total_seconds() / 3600.0
+                    timeout_hours = getattr(config, "MOONBAG_TIMEOUT_HOURS", 3.5)
+                    max_stagnant_profit = getattr(config, "MOONBAG_TIMEOUT_MAX_PROFIT", 1.5)
+                    
+                    if elapsed_hours >= timeout_hours and profit_pct <= max_stagnant_profit:
+                        logger.info(
+                            f"⏰ MOONBAG TIMEOUT REACHED for {symbol}! "
+                            f"Posisi sisa sudah berjalan {elapsed_hours:.1f} jam (>= {timeout_hours} jam) dengan profit stagnan (+{profit_pct:.2f}%). "
+                            f"Closing 100% remaining position ({amount} {symbol}) to lock profit in cash & release capital!"
+                        )
+                        self.remove_stop(symbol)
+                        close_order = self.order_mgr.close_position(
+                            symbol=symbol,
+                            side=side,
+                            amount=pos.get("amount", amount),
+                            reason=f"moonbag_timeout_{elapsed_hours:.1f}h (+{profit_pct:.2f}%)"
+                        )
+                        if close_order:
+                            result["action"] = "closed"
+                            result["reason"] = "moonbag_timeout"
+                            result["profit_pct"] = profit_pct
+                            return result
+                except Exception as e:
+                    logger.debug(f"Moonbag timeout check error: {e}")
 
         # 3. Hitung checkpoint tertinggi yang sudah tercapai (Dinamis Adaptif ATR)
         current_checkpoint = self.state.get_current_checkpoint() or 0

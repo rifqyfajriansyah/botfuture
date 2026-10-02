@@ -123,7 +123,8 @@ class ReversalGuard:
                     min_drawdown = getattr(config, "BOUNCE_FAILURE_MIN_DRAWDOWN_PERCENT", -0.75)
                     min_rebound = getattr(config, "BOUNCE_FAILURE_MIN_REBOUND_PERCENT", 0.35)
                     slip_tol = getattr(config, "BOUNCE_FAILURE_SLIPPAGE_TOLERANCE", 0.25)
-                    max_loss = getattr(config, "BOUNCE_FAILURE_MAX_LOSS_PERCENT", -0.85)
+                    max_loss_pct = getattr(config, "BOUNCE_FAILURE_MAX_LOSS_PERCENT", -1.15)
+                    max_loss_usdt = getattr(config, "MAX_LOSS_USDT_CAP", -8.80)
                     
                     # Kondisi Dead-Cat Bounce yang Valid:
                     # 1. Pernah mengalami drawdown minimal (lowest_pct <= min_drawdown)
@@ -161,34 +162,39 @@ class ReversalGuard:
                     had_rebound = has_real_rebound_data and (rebound_height >= min_rebound)
                     lost_momentum = had_rebound and (rebound_peak_pct - profit_pct >= slip_tol) and (profit_pct < 0)
                     is_dead_cat_bounce = had_significant_drawdown and had_rebound and lost_momentum
+
+                    # Bounded Cutloss (Circuit Breaker):
+                    # Jika harga SUDAH di luar batas benteng EMA 55 (has_tested_ema55)
+                    # dan meluncur lurus melawan kita hingga menyentuh batas rugi maksimal (% harga atau nominal USDT),
+                    # tebas langsung tanpa perlu menunggu siklus pantulan!
+                    approx_pnl_usdt = (profit_pct / 100.0) * (entry_price * float(pos.get("amount", 0)))
+                    is_max_loss_breached = has_tested_ema55 and ((profit_pct <= max_loss_pct) or (approx_pnl_usdt <= max_loss_usdt))
                     
-                    if is_dead_cat_bounce:
-                        # EKSEKUSI DEAD-CAT BOUNCE INSTAN (Meminimalisir Kerugian):
-                        # Jika koin sudah terbukti mantul lalu berbalik melorot kembali,
-                        # TIDAK PERLU tunggu volume meledak! Langsung tebas saat itu juga sebelum merosot ke dasar jurang!
-                        cut_cause = "dead_cat_bounce_rejection"
+                    if is_dead_cat_bounce or is_max_loss_breached:
+                        cut_cause = "dead_cat_bounce_rejection" if is_dead_cat_bounce else f"max_loss_ema_breached ({profit_pct:.2f}% | ${approx_pnl_usdt:.2f})"
                         logger.warning(
-                            f"🛑 BOUNCE FAILURE GUARD CONFIRMED ({cut_cause}) for {symbol}! "
-                            f"Profit: {profit_pct:.2f}% | Drawdown: {lowest_pct:.2f}% | Rebound Peak: {rebound_peak_pct:.2f}% -> Meminimalisir kerugian!"
+                            f"🛑 BOUNCE FAILURE / BOUNDED LOSS GUARD CONFIRMED ({cut_cause}) for {symbol}! "
+                            f"Profit: {profit_pct:.2f}% (${approx_pnl_usdt:.2f}) | Drawdown: {lowest_pct:.2f}% | EMA55 tested: {has_tested_ema55} -> Membatasi kerugian maksimal!"
                         )
                         self.trailing_mgr.remove_stop(symbol)
                         close_result = self.order_mgr.close_position(
                             symbol=symbol,
                             side=side,
                             amount=pos["amount"],
-                            reason=f"bounce_failure_guard: {cut_cause} ({profit_pct:.2f}%)",
+                            reason=f"bounce_failure_guard: {cut_cause}",
                         )
                         if close_result:
                             result["action"] = "closed"
-                            result["reason"] = f"bounce_failure_guard_{cut_cause}"
+                            result["reason"] = f"bounce_failure_{cut_cause}"
                             result["details"] = {
                                 "profit_pct": profit_pct,
+                                "pnl_usdt": approx_pnl_usdt,
                                 "lowest_pct": lowest_pct,
                                 "rebound_peak_pct": rebound_peak_pct
                             }
                             logger.info(
                                 f"🔴 Position CLOSED by Bounce Failure Guard | "
-                                f"Kerugian diminimalisir di profit {profit_pct:.2f}% sebelum merosot lebih dalam!"
+                                f"Kerugian dibatasi di profit {profit_pct:.2f}% (${approx_pnl_usdt:.2f}) sebelum membengkak lebih dalam!"
                             )
                             return result
 

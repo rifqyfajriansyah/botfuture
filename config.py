@@ -151,6 +151,43 @@ MID_RANGE_TRIGGER_PROFIT = 0.55             # Aktif HANYA jika koin sudah pernah
 MID_RANGE_LOCK_PROFIT = 0.08                # Batas aman di BEP tipis (+0.08% cover fee Binance, modal utuh)
 
 # =============================================================================
+# CHOPPY AUTO-BEP & ADAPTIVE REGIME EXIT (PENGAMAN PASAR CHOPPY VS GACOR)
+# =============================================================================
+# Filosofi:
+# 1. Pintu Masuk (Entry): Tetap bebas tanpa dicekik agar tidak ketinggalan kereta.
+# 2. Pasca-Entry (Setelah Masuk):
+#    - Bot mengecek nilai ADX 15m & arah kekuatan (+DI vs -DI) koin.
+#    - Jika ADX < 22 (Pasar Choppy/Sideways) ATAU Arah DI melawan posisi (+DI vs -DI misaligned):
+#      * Koin berada di Mode Choppy:
+#        a. AUTO-BEP LOCK: Begitu floating profit >= CHOPPY_BEP_TRIGGER_PERCENT (+0.55%),
+#           bot OTOMATIS langsung mengunci Stop Loss ke level BEP (+0.12% cover fee).
+#           Modal terlindungi 100%, anti-loss dari pembalikan arah!
+#        b. CHOPPY PARTIAL TP: Target Partial TP 1 (CP1) diturunkan ke +0.95% agar lekas
+#           mengamankan 50% uang dapur di dompet sebelum koin kehilangan bensin.
+#    - Jika ADX >= 25 dan DI searah (Pasar Gacor / Strong Trend):
+#      * Mode Gacor: Target CP1 normal (+1.45% s/d +1.80%) dengan Trailing Ratchet lega
+#        mengejar Target Puncak Moonbag ($15 s/d $20 USD | +2.70%).
+CHOPPY_AUTO_BEP_ENABLED = True
+CHOPPY_ADX_THRESHOLD = 22.0                  # Batas ADX 15m koin: di bawah 22.0 diklasifikasikan sebagai Choppy/Lemas
+CHOPPY_BEP_TRIGGER_PERCENT = 0.55            # Floating profit minimal +0.55% untuk langsung kunci stop ke BEP
+CHOPPY_BEP_LOCK_PERCENT = 0.12               # Level stop BEP yang dikunci (+0.12% untuk menutup biaya trading fee)
+CHOPPY_CP1_PERCENT = 0.95                    # Target Partial TP 1 koin choppy (+0.95%) agar cepat bungkus profit
+MOONBAG_TARGET_USD = 20.0                    # Target puncak profit satu trade ($20 USD | ~+2.72% harga)
+
+# =============================================================================
+# MOONBAG TIMEOUT (PENGAMAN KOIN STAGNAN PASCA-PARTIAL TP)
+# =============================================================================
+# Filosofi:
+# - Koin yang mau meledak liar (MON, NMR, PENGU, AAVE, DASH) 96% selesai dalam < 2.5 jam.
+# - Jika koin sudah ambil Partial TP (Moonbag), tapi setelah MOONBAG_TIMEOUT_HOURS (3.5 jam)
+#   belum tembus Checkpoint 2 (stagnan di bawah MOONBAG_TIMEOUT_MAX_PROFIT 1.5%),
+#   bot otomatis menutup sisa posisi 100% via Market Order untuk mengunci sisa profit ke kas!
+# - Modal margin $245 langsung cair dan bebas berputar mencari setup baru.
+MOONBAG_TIMEOUT_ENABLED = True
+MOONBAG_TIMEOUT_HOURS = 3.5                   # Maksimal 3.5 jam setelah entry jika sudah Partial TP
+MOONBAG_TIMEOUT_MAX_PROFIT = 1.5              # Hanya aktif jika profit masih loyo/stagnan di bawah +1.5%
+
+# =============================================================================
 # TIME-PROGRESSIVE BEP (OPSI A: SATPAM KOIN LEMOT / SIDEWAYS)
 # =============================================================================
 # Filosofi Opsi A:
@@ -200,6 +237,8 @@ BOUNCE_FAILURE_EMA_BUFFER_PERCENT = 0.52     # Toleransi buffer lantai EMA 55 (0
 BOUNCE_FAILURE_MIN_DRAWDOWN_PERCENT = -0.75  # Drawdown minimal terhadap entry untuk konfirmasi dip nyata
 BOUNCE_FAILURE_MIN_REBOUND_PERCENT = 0.35    # Sempat berhasil mantul naik minimal +0.35% harga dari dasar jurang
 BOUNCE_FAILURE_SLIPPAGE_TOLERANCE = 0.25     # Jika setelah mantul harga melorot kembali >= 0.25% dari puncak pantulan -> TEBAS!
+BOUNCE_FAILURE_MAX_LOSS_PERCENT = -1.15      # Batas minus harga maksimal (-1.15% harga | ~ -3.45% ROE di 3x) setelah tembus batas EMA 55
+MAX_LOSS_USDT_CAP = -8.80                    # Batas kerugian dolar nominal maksimal (-$8.80 USDT) setelah tembus batas EMA 55
 
 # =============================================================================
 # PANIC VOLUME DUMP CUT (Deteksi Air Terjun vs Gojekan Jarum di Lilin 1m)
