@@ -92,6 +92,14 @@ ORDER_TIMEOUT_MINUTES = 7               # Default timeout 7 menit
 ORDER_CHECK_INTERVAL = 10               # Cek order setiap 10 detik
 
 # =============================================================================
+# PARTIAL FILL SWEEP (Anti-Ketinggalan Kereta)
+# =============================================================================
+PARTIAL_FILL_SWEEP_ENABLED = True       # Jika order terisi sebagian saat timeout, sapu sisanya pakai market
+MIN_PARTIAL_FILL_RATIO = 0.20           # Minimal 20% sudah terisi untuk memicu sweep
+MAX_PARTIAL_FILL_RATIO = 0.95           # Di atas 95% dianggap sudah full
+MAX_SWEEP_SLIPPAGE_PERCENT = 0.35       # Maksimal toleransi selisih harga dari entry awal (0.35%) agar tidak beli di pucuk
+
+# =============================================================================
 # FLEXIBLE & DYNAMIC ATR TRAILING STOP & PARTIAL TAKE PROFIT
 # =============================================================================
 # 1. DYNAMIC TAKE PROFIT UTAMA (Target Adaptif Volatilitas Koin)

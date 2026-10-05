@@ -489,6 +489,54 @@ class OrderManager:
         
         return success
 
+    def sweep_remaining_market(self, symbol, side, remaining_amount, first_entry_price, first_amount):
+        """
+        Sapu sisa kuota yang belum terisi akibat partial fill limit order menggunakan MARKET order.
+        Menghitung ulang harga rata-rata (Volume Weighted Average Price) dan memperbarui state.
+        """
+        try:
+            market_side = "buy" if side.lower() == "long" else "sell"
+            formatted_amount = float(self.exchange.amount_to_precision(symbol, remaining_amount))
+            if formatted_amount <= 0:
+                logger.warning(f"⚠️ Formatted sweep amount <= 0 ({formatted_amount}), skip sweep.")
+                return False
+                
+            logger.info(f"⚡ Mengeksekusi MARKET SWEEP {market_side.upper()} {symbol} | Amount: {formatted_amount}")
+            order = self.exchange.create_order(
+                symbol=symbol,
+                type="market",
+                side=market_side,
+                amount=formatted_amount,
+                params={"reduceOnly": False}
+            )
+            
+            fill_price = order.get("average") or order.get("price")
+            if not fill_price or float(fill_price) <= 0:
+                ticker = self.exchange.fetch_ticker(symbol)
+                fill_price = ticker.get("last", first_entry_price)
+            fill_price = float(fill_price)
+            actual_filled = float(order.get("filled", formatted_amount))
+            
+            total_amount = first_amount + actual_filled
+            weighted_price = ((first_amount * first_entry_price) + (actual_filled * fill_price)) / total_amount
+            
+            logger.info(
+                f"✅ SWEEP BERHASIL! {symbol} terisi tambahan {actual_filled} @ {fill_price:.5f}. "
+                f"Total Posisi: {total_amount} | New Avg Entry: {weighted_price:.5f}"
+            )
+            
+            self.state.set_position(
+                symbol=symbol,
+                side=side,
+                entry_price=weighted_price,
+                amount=total_amount,
+                order_id="partial_swept"
+            )
+            return True
+        except Exception as e:
+            logger.error(f"❌ Gagal sweep sisa market order {symbol}: {e}")
+            return False
+
     def sweep_orphaned_orders(self):
         """
         Sapu bersih semua sisa conditional / stop / limit order (termasuk Algo Orders)

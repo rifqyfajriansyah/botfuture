@@ -391,11 +391,43 @@ class TradingBot:
                 f"⏰ Limit Order timeout ({timeout_min} min)! "
                 f"Canceling order {order_id} for {symbol}"
             )
+            orig_amount = float(order.get("amount", 0.0))
             self.order_mgr.cancel_order(symbol, order_id)
             
             # Cek jika ternyata ada partial fill yang diadopsi resmi ke state
             pos = self.state.get_position()
             if pos and pos.get("symbol") == symbol:
+                current_amount = float(pos.get("amount", 0.0))
+                remaining = orig_amount - current_amount
+                fill_ratio = current_amount / orig_amount if orig_amount > 0 else 0.0
+
+                # PARTIAL FILL SWEEP (Anti Ketinggalan Kereta)
+                if (
+                    getattr(config, "PARTIAL_FILL_SWEEP_ENABLED", True)
+                    and getattr(config, "MIN_PARTIAL_FILL_RATIO", 0.20) <= fill_ratio < getattr(config, "MAX_PARTIAL_FILL_RATIO", 0.95)
+                    and remaining > 0
+                ):
+                    entry_p = float(pos.get("entry_price", order.get("price", 0.0)))
+                    side = pos.get("side", order.get("side", "long"))
+                    current_price = self.order_mgr.get_current_price(symbol)
+                    
+                    if entry_p > 0 and current_price > 0:
+                        slippage_pct = (current_price - entry_p) / entry_p * 100.0 if side == "long" else (entry_p - current_price) / entry_p * 100.0
+                        max_slip = getattr(config, "MAX_SWEEP_SLIPPAGE_PERCENT", 0.35)
+                        if slippage_pct <= max_slip:
+                            logger.info(
+                                f"🚀 PARTIAL FILL SWEEP: {symbol} terisi {fill_ratio*100:.1f}%. "
+                                f"Harga ({current_price}) masih dekat ({slippage_pct:+.2f}% vs {entry_p}). "
+                                f"Menyapu sisa {remaining:.2f} pakai MARKET order..."
+                            )
+                            if self.order_mgr.sweep_remaining_market(symbol, side, remaining, entry_p, current_amount):
+                                pos = self.state.get_position()
+                        else:
+                            logger.warning(
+                                f"⚠️ Sisa order {symbol} tidak disapu: harga sudah lari ({slippage_pct:+.2f}% > {max_slip}%). "
+                                f"Melanjutkan posisi parsial ({current_amount})."
+                            )
+
                 logger.warning(
                     f"🛡️ Partial fill terdeteksi & diadopsi untuk {symbol} ({pos['amount']})! "
                     f"Memasang Emergency SL..."
