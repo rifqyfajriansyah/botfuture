@@ -379,3 +379,14 @@ class StateManager:
         """Update highest profit yang pernah dicapai posisi ini."""
         self.update_profit_extremes(profit_pct)
 
+    def get_daily_pnl(self):
+        """Hitung total realized PnL hari ini (sejak jam 00:00 UTC/WIB)."""
+        now = datetime.now()
+        today_prefix = now.strftime("%Y-%m-%d")
+        daily_pnl = 0.0
+        for trade in self.state.get("trade_history", []):
+            ct = str(trade.get("close_time", ""))
+            if ct and ct.startswith(today_prefix):
+                daily_pnl += float(trade.get("pnl", 0.0))
+        return round(daily_pnl, 2)
+

@@ -172,6 +172,13 @@ CHOPPY_ADX_THRESHOLD = 22.0                  # Batas ADX 15m koin: di bawah 22.0
 CHOPPY_BEP_TRIGGER_PERCENT = 0.55            # Floating profit minimal +0.55% untuk langsung kunci stop ke BEP
 CHOPPY_BEP_LOCK_PERCENT = 0.12               # Level stop BEP yang dikunci (+0.12% untuk menutup biaya trading fee)
 CHOPPY_CP1_PERCENT = 0.95                    # Target Partial TP 1 koin choppy (+0.95%) agar cepat bungkus profit
+
+# =============================================================================
+# TARGET DISIPLIN HARIAN (COMPOUNDING SNOWBALL) & STEPPED RATCHET CHOPPY
+# =============================================================================
+DAILY_TARGET_PROFIT_PERCENT = 10.0            # Target cuan harian dinamis (10% dari modal akun)
+CHOPPY_RATCHET_TRIGGER_PERCENT = 0.50         # Mulai aktif mengawal ketat saat koin choppy naik >= +0.50%
+CHOPPY_RATCHET_TRAIL_PERCENT = 0.20           # Jarak kawal rapat mepet (0.20% di belakang harga pucuk)
 MOONBAG_TARGET_USD = 20.0                    # Target puncak profit satu trade ($20 USD | ~+2.72% harga)
 
 # =============================================================================
@@ -250,7 +257,7 @@ MAX_LOSS_USDT_CAP = -8.80                    # Batas kerugian dolar nominal maks
 # - Jika Volume kecil/biasa (< 2.5x) -> TAHAN! Ini gojekan jarum likuidasi, beri ruang mantul!
 PANIC_VOLUME_CUT_ENABLED = True
 PANIC_VOLUME_CUT_MIN_DRAWDOWN = -0.75        # Hanya aktif jika drawdown sudah menyentuh -0.75% harga
-PANIC_VOLUME_CUT_RATIO = 2.5                 # Volume ledakan 1m >= 2.5x rata-rata SMA 10 lilin 1m
+PANIC_VOLUME_CUT_RATIO = 3.8                 # Volume ledakan 1m >= 2.5x rata-rata SMA 10 lilin 1m
 
 # =============================================================================
 # DYNAMIC CONFLUENCE ENTRY (EMA 21 & ATR Pullback)
