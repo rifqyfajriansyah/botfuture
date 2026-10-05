@@ -401,10 +401,22 @@ class TradingBot:
                 remaining = orig_amount - current_amount
                 fill_ratio = current_amount / orig_amount if orig_amount > 0 else 0.0
 
+                side = pos.get("side", order.get("side", "long"))
+
+                # JIKA DI BAWAH 20% (< 0.20): DUST / RECEH -> LANGSUNG CLOSE DI TEMPAT!
+                if fill_ratio < getattr(config, "MIN_PARTIAL_FILL_RATIO", 0.20):
+                    logger.warning(
+                        f"🧹 DUST CLEANUP: {symbol} hanya terisi {fill_ratio*100:.1f}% ({current_amount}/{orig_amount}) saat timeout! "
+                        f"Menutup posisi receh ini langsung agar modal & slot tidak tersandera..."
+                    )
+                    self.order_mgr.close_position(symbol, side, current_amount, reason="dust_partial_cleanup")
+                    self.state.clear_position(start_cooldown=False)
+                    return
+
                 # PARTIAL FILL SWEEP (Anti Ketinggalan Kereta)
                 if (
                     getattr(config, "PARTIAL_FILL_SWEEP_ENABLED", True)
-                    and getattr(config, "MIN_PARTIAL_FILL_RATIO", 0.20) <= fill_ratio < getattr(config, "MAX_PARTIAL_FILL_RATIO", 0.95)
+                    and fill_ratio < getattr(config, "MAX_PARTIAL_FILL_RATIO", 0.95)
                     and remaining > 0
                 ):
                     entry_p = float(pos.get("entry_price", order.get("price", 0.0)))

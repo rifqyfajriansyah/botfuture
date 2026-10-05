@@ -163,17 +163,18 @@ class ReversalGuard:
                     lost_momentum = had_rebound and (rebound_peak_pct - profit_pct >= slip_tol) and (profit_pct < 0)
                     is_dead_cat_bounce = had_significant_drawdown and had_rebound and lost_momentum
 
-                    # Bounded Cutloss (Circuit Breaker):
-                    # Jika harga SUDAH di luar batas benteng EMA 55 (has_tested_ema55)
-                    # dan meluncur lurus melawan kita hingga menyentuh batas rugi maksimal (% harga atau nominal USDT),
-                    # tebas langsung tanpa perlu menunggu siklus pantulan!
+                    # Bounded Cutloss (Absolute Hard Loss Cap Circuit Breaker):
+                    # Jika kerugian menembus batas maksimal (-1.15% harga atau -$8.80 USDT),
+                    # tebas langsung sebagai sekring pengaman mutlak agar kerugian tidak melar ke -$13!
+                    # Syarat EMA55 tetap berlaku untuk dead-cat bounce biasa, tetapi untuk batas rugi maksimal
+                    # ini menjadi pengaman keras (hard circuit breaker) yang langsung memotong posisi.
                     approx_pnl_usdt = (profit_pct / 100.0) * (entry_price * float(pos.get("amount", 0)))
-                    is_max_loss_breached = has_tested_ema55 and ((profit_pct <= max_loss_pct) or (approx_pnl_usdt <= max_loss_usdt))
+                    is_max_loss_breached = (profit_pct <= max_loss_pct) or (approx_pnl_usdt <= max_loss_usdt)
                     
                     if is_dead_cat_bounce or is_max_loss_breached:
-                        cut_cause = "dead_cat_bounce_rejection" if is_dead_cat_bounce else f"max_loss_ema_breached ({profit_pct:.2f}% | ${approx_pnl_usdt:.2f})"
+                        cut_cause = "dead_cat_bounce_rejection" if is_dead_cat_bounce else f"hard_max_loss_cap ({profit_pct:.2f}% | ${approx_pnl_usdt:.2f})"
                         logger.warning(
-                            f"🛑 BOUNCE FAILURE / BOUNDED LOSS GUARD CONFIRMED ({cut_cause}) for {symbol}! "
+                            f"🛑 BOUNCE FAILURE / HARD LOSS GUARD CONFIRMED ({cut_cause}) for {symbol}! "
                             f"Profit: {profit_pct:.2f}% (${approx_pnl_usdt:.2f}) | Drawdown: {lowest_pct:.2f}% | EMA55 tested: {has_tested_ema55} -> Membatasi kerugian maksimal!"
                         )
                         self.trailing_mgr.remove_stop(symbol)
