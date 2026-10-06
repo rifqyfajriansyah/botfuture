@@ -169,6 +169,7 @@ class ReversalGuard:
                     # Syarat EMA55 tetap berlaku untuk dead-cat bounce biasa, tetapi untuk batas rugi maksimal
                     # ini menjadi pengaman keras (hard circuit breaker) yang langsung memotong posisi.
                     # Murni persentase pergerakan harga koin (anti-tercekik nominal statis)
+                    approx_pnl_usdt = (profit_pct / 100.0) * (entry_price * float(pos.get("amount", 0)))
                     is_max_loss_breached = (profit_pct <= max_loss_pct)
                     
                     if is_dead_cat_bounce or is_max_loss_breached:
