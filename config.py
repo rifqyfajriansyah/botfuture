@@ -19,7 +19,7 @@ TRADING_MODE = os.getenv("TRADING_MODE", "testnet")  # 'live' atau 'testnet'
 # =============================================================================
 # TRADING PARAMETERS
 # =============================================================================
-LEVERAGE = 3                    # Leverage 3x
+LEVERAGE = 4                    # Leverage 3x
 MARGIN_MODE = "isolated"        # Isolated margin (lebih aman per posisi)
 BALANCE_USAGE = 0.90            # Gunakan 90% balance (maksimalisasi profit dengan entry terfilter ketat)
 MAX_POSITIONS = 1               # Hanya 1 posisi aktif
@@ -33,9 +33,15 @@ FIXED_COOLDOWN_ENABLED = True           # Kalah maupun menang delay tetap fixed 
 SYMBOL_COOLDOWN_MINUTES = 60            # Cooldown khusus koin yang sama jika trade selesai (60 menit anti-revenge koin serupa)
 TIMEOUT_COOLDOWN_MINUTES = 1            # Cooldown global jika limit order cancel/timeout (hanya 1m sebelum scan koin lain)
 TIMEOUT_SYMBOL_COOLDOWN_MINUTES = 15     # Cooldown khusus simbol jika limit order cancel/timeout (hanya 15m / 1 candle)
-MAX_CONSECUTIVE_LOSSES = 5              # Cadangan safety threshold
-DOUBLE_COOLDOWN_AFTER_LOSSES = 5
-CONSECUTIVE_LOSS_PAUSE_MINUTES = 60
+MAX_CONSECUTIVE_LOSSES = 999            # Dinonaktifkan: gas terus tanpa jeda/pause losestreak
+DOUBLE_COOLDOWN_AFTER_LOSSES = 999      # Dinonaktifkan
+CONSECUTIVE_LOSS_PAUSE_MINUTES = 0      # Dinonaktifkan
+
+# =============================================================================
+# COMBAT MODE / HIGH-FREQUENCY MONITORING (Anti-Flash Slippage Guard)
+# =============================================================================
+COMBAT_LOOP_INTERVAL = 2.5              # Interval cepat 2.5 detik saat posisi floating minus (tangkap lonjakan kilat 4x lebih cepat)
+COMBAT_TRIGGER_DRAWDOWN = -0.40         # Masuk mode siaga cepat jika drawdown <= -0.40% harga
 
 # =============================================================================
 # ENTRY RISK GATEKEEPER (Anti-Pucuk & Filter Kualitas Sinyal)
@@ -281,7 +287,7 @@ TRAILING_CHECKPOINT_PERCENT = 2.0
 # EMERGENCY STOP LOSS (Safety Net - Anti Likuidasi)
 # =============================================================================
 EMERGENCY_SL_ENABLED = True         # Safety net aktif (jauh agar tidak kejilat wick)
-EMERGENCY_SL_PERCENT = 25.0         # Pasang di -25% (sebelum likuidasi leverage 3x ~33%)
+EMERGENCY_SL_PERCENT = 18.0         # Pasang di -25% (sebelum likuidasi leverage 3x ~33%)
 
 # =============================================================================
 # SIGNAL ENGINE SETTINGS (Institutional TPLR)

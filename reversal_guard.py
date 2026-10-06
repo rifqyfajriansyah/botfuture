@@ -168,14 +168,14 @@ class ReversalGuard:
                     # tebas langsung sebagai sekring pengaman mutlak agar kerugian tidak melar ke -$13!
                     # Syarat EMA55 tetap berlaku untuk dead-cat bounce biasa, tetapi untuk batas rugi maksimal
                     # ini menjadi pengaman keras (hard circuit breaker) yang langsung memotong posisi.
-                    approx_pnl_usdt = (profit_pct / 100.0) * (entry_price * float(pos.get("amount", 0)))
-                    is_max_loss_breached = (profit_pct <= max_loss_pct) or (approx_pnl_usdt <= max_loss_usdt)
+                    # Murni persentase pergerakan harga koin (anti-tercekik nominal statis)
+                    is_max_loss_breached = (profit_pct <= max_loss_pct)
                     
                     if is_dead_cat_bounce or is_max_loss_breached:
-                        cut_cause = "dead_cat_bounce_rejection" if is_dead_cat_bounce else f"hard_max_loss_cap ({profit_pct:.2f}% | ${approx_pnl_usdt:.2f})"
+                        cut_cause = "dead_cat_bounce_rejection" if is_dead_cat_bounce else f"hard_max_loss_cap ({profit_pct:.2f}%)"
                         logger.warning(
                             f"🛑 BOUNCE FAILURE / HARD LOSS GUARD CONFIRMED ({cut_cause}) for {symbol}! "
-                            f"Profit: {profit_pct:.2f}% (${approx_pnl_usdt:.2f}) | Drawdown: {lowest_pct:.2f}% | EMA55 tested: {has_tested_ema55} -> Membatasi kerugian maksimal!"
+                            f"Profit: {profit_pct:.2f}% | Drawdown: {lowest_pct:.2f}% | EMA55 tested: {has_tested_ema55} -> Membatasi kerugian maksimal murni persentase!"
                         )
                         self.trailing_mgr.remove_stop(symbol)
                         close_result = self.order_mgr.close_position(

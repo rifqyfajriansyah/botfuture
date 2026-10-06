@@ -73,6 +73,8 @@ class TradingBot:
         self.trailing_mgr = None
         self.reversal_guard = None
         self._last_cooldown_log = 0
+        self.current_loop_interval = getattr(config, "MAIN_LOOP_INTERVAL", 10)
+        self._combat_mode_active = False
     
     def initialize(self):
         """Initialize semua komponen bot."""
@@ -161,11 +163,15 @@ class TradingBot:
                 if self.state.has_position():
                     self._handle_active_position()
                 elif self.state.has_pending_order():
+                    self._combat_mode_active = False
+                    self.current_loop_interval = getattr(config, "MAIN_LOOP_INTERVAL", 10)
                     self._handle_pending_order()
                 else:
+                    self._combat_mode_active = False
+                    self.current_loop_interval = getattr(config, "MAIN_LOOP_INTERVAL", 10)
                     self._scan_and_trade()
                 
-                time.sleep(config.MAIN_LOOP_INTERVAL)
+                time.sleep(self.current_loop_interval)
                 
             except KeyboardInterrupt:
                 logger.info("🛑 KeyboardInterrupt. Stopping...")
@@ -199,6 +205,28 @@ class TradingBot:
         profit_pct = self.trailing_mgr.calculate_profit_pct(
             entry_price, current_price, side
         )
+        
+        # Dynamic Combat Monitoring: Percepat loop ke 2.5 detik jika posisi minus
+        combat_trigger = getattr(config, "COMBAT_TRIGGER_DRAWDOWN", -0.40)
+        combat_interval = getattr(config, "COMBAT_LOOP_INTERVAL", 2.5)
+        normal_interval = getattr(config, "MAIN_LOOP_INTERVAL", 10)
+        
+        if profit_pct <= combat_trigger:
+            if not self._combat_mode_active:
+                logger.warning(
+                    f"⚡ COMBAT MODE ACTIVATED for {symbol}! Drawdown {profit_pct:.2f}% <= {combat_trigger:.2f}%. "
+                    f"Interval monitoring dipercepat ke {combat_interval}s untuk mitigasi lonjakan slippage!"
+                )
+                self._combat_mode_active = True
+            self.current_loop_interval = combat_interval
+        else:
+            if self._combat_mode_active:
+                logger.info(
+                    f"🕊️ Position recovered ({profit_pct:+.2f}% > {combat_trigger:.2f}%). "
+                    f"Kembali ke interval normal ({normal_interval}s)."
+                )
+                self._combat_mode_active = False
+            self.current_loop_interval = normal_interval
         checkpoint = self.state.get_current_checkpoint()
         
         # Hitung PnL dalam USDT dan ROE%

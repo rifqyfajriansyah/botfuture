@@ -91,7 +91,7 @@ class StateManager:
         
         if fixed_cooldown or ignore_loss_multiplier:
             actual_minutes = base_minutes
-        elif losses >= config.MAX_CONSECUTIVE_LOSSES:
+        elif losses >= config.MAX_CONSECUTIVE_LOSSES and config.MAX_CONSECUTIVE_LOSSES < 100:
             actual_minutes = getattr(config, "CONSECUTIVE_LOSS_PAUSE_MINUTES", 120)
             logger.warning(
                 f"🛑 Max Consecutive Losses ({losses}) tercapai! "
@@ -137,7 +137,7 @@ class StateManager:
         if now < global_until:
             rem = global_until - now
             losses = self.state.get("consecutive_losses", 0)
-            if losses >= config.MAX_CONSECUTIVE_LOSSES:
+            if losses >= config.MAX_CONSECUTIVE_LOSSES and config.MAX_CONSECUTIVE_LOSSES < 100:
                 return True, rem, f"Losestreak pause ({int(rem/60)}m tersisa dari 2 jam)"
             return True, rem, f"Global cooldown ({int(rem)}s tersisa)"
         else:
