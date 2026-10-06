@@ -19,7 +19,7 @@ TRADING_MODE = os.getenv("TRADING_MODE", "testnet")  # 'live' atau 'testnet'
 # =============================================================================
 # TRADING PARAMETERS
 # =============================================================================
-LEVERAGE = 4                    # Leverage 3x
+LEVERAGE = 3                    # Leverage 3x (Gold Standard)
 MARGIN_MODE = "isolated"        # Isolated margin (lebih aman per posisi)
 BALANCE_USAGE = 0.90            # Gunakan 90% balance (maksimalisasi profit dengan entry terfilter ketat)
 MAX_POSITIONS = 1               # Hanya 1 posisi aktif
@@ -46,7 +46,7 @@ COMBAT_TRIGGER_DRAWDOWN = -0.40         # Masuk mode siaga cepat jika drawdown <
 # =============================================================================
 # ENTRY RISK GATEKEEPER (Anti-Pucuk & Filter Kualitas Sinyal)
 # =============================================================================
-MIN_ENTRY_REJECTION_WICK_PERCENT = 22.0     # Wajib ada jarum penolakan minimal 22% (momentum kuat seringkali wick 20-25%)
+MIN_ENTRY_REJECTION_WICK_PERCENT = 28.0     # Wajib ada jarum penolakan minimal 22% (momentum kuat seringkali wick 20-25%)
 MAX_ENTRY_RISK_EMA55_PERCENT = 1.35         # Maksimal jarak harga entry ke support EMA 55 hanya 0.88% (anti resiko tebal, cutloss kecil)
 ANTI_CLIMAX_LOOKBACK_CANDLES = 8            # Pantau 8 candle terakhir (2 jam)
 ANTI_CLIMAX_MAX_RSI = 70.0                  # Dilarang masuk LONG jika dalam 2 jam terakhir baru saja overbought > 70
@@ -55,8 +55,8 @@ BTC_FILTER_ENABLED = True                   # Pantau arah Bitcoin sebelum tradin
 BTC_SYMBOL = "BTC/USDT"                     # Benchmark koin induk
 BTC_FLASH_DUMP_THRESHOLD_PERCENT = 0.55     # BTC flash dump aktif jika lilin 15m drop >= -0.55% (nyata, bukan goyangan $200)
 BTC_FLASH_LOCK_MINUTES = 15                 # Kunci proteksi flash dump/pump selama 15m (anti-whipsaw / kedipan micro)
-BTC_FILTER_MODE = "smart"                   # 'smart': Izinkan altcoin kuat (HTF selaras) saat BTC tenang/sideways, blokir mutlak saat BTC flash dump/pump aktif
-STRICT_HTF_REQUIRED = False                 # Izinkan koin decoupling yang punya tren 1H kuat
+BTC_FILTER_MODE = "strict"                   # 'smart': Izinkan altcoin kuat (HTF selaras) saat BTC tenang/sideways, blokir mutlak saat BTC flash dump/pump aktif
+STRICT_HTF_REQUIRED = True                 # Izinkan koin decoupling yang punya tren 1H kuat
 
 # ENTRY 2.0 (BTC TRAFFIC LIGHT & REGIME CONFLUENCE - ANTI-GOJEK KETAT)
 BTC_CHOP_RSI_OVERSOLD = 42.0                # Jangan buka SHORT jika RSI 15m BTC < 42 (zona bawah rawan rebound dead-cat bounce)
@@ -255,7 +255,7 @@ MAX_STAGNANT_MIN_PROFIT_PERCENT = 0.2
 BOUNCE_FAILURE_GUARD_ENABLED = True
 BOUNCE_FAILURE_REQUIRE_EMA55_TEST = True     # Rem hanya aktif jika harga sudah menguji/menusuk ke batas lantai EMA 55 (Safe Pocket)
 BOUNCE_FAILURE_EMA_BUFFER_PERCENT = 0.52     # Toleransi buffer lantai EMA 55 (0.52% di bawah/atas EMA 55)
-BOUNCE_FAILURE_MIN_DRAWDOWN_PERCENT = -0.75  # Drawdown minimal terhadap entry untuk konfirmasi dip nyata
+BOUNCE_FAILURE_MIN_DRAWDOWN_PERCENT = -0.90  # Drawdown minimal terhadap entry untuk konfirmasi dip nyata
 BOUNCE_FAILURE_MIN_REBOUND_PERCENT = 0.35    # Sempat berhasil mantul naik minimal +0.35% harga dari dasar jurang
 BOUNCE_FAILURE_SLIPPAGE_TOLERANCE = 0.25     # Jika setelah mantul harga melorot kembali >= 0.25% dari puncak pantulan -> TEBAS!
 BOUNCE_FAILURE_MAX_LOSS_PERCENT = -1.15      # Batas minus harga maksimal (-1.15% harga | ~ -3.45% ROE di 3x) setelah tembus batas EMA 55
@@ -287,7 +287,7 @@ TRAILING_CHECKPOINT_PERCENT = 2.0
 # EMERGENCY STOP LOSS (Safety Net - Anti Likuidasi)
 # =============================================================================
 EMERGENCY_SL_ENABLED = True         # Safety net aktif (jauh agar tidak kejilat wick)
-EMERGENCY_SL_PERCENT = 18.0         # Pasang di -25% (sebelum likuidasi leverage 3x ~33%)
+EMERGENCY_SL_PERCENT = 25.0         # Pasang di -25% (sebelum likuidasi leverage 3x ~33%)
 
 # =============================================================================
 # SIGNAL ENGINE SETTINGS (Institutional TPLR)
