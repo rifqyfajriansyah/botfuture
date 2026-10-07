@@ -191,8 +191,8 @@ CHOPPY_CP1_PERCENT = 0.95                    # Target Partial TP 1 koin choppy (
 # TARGET DISIPLIN HARIAN (COMPOUNDING SNOWBALL) & STEPPED RATCHET CHOPPY
 # =============================================================================
 DAILY_TARGET_PROFIT_PERCENT = 10.0            # Target cuan harian dinamis (10% dari modal akun)
-CHOPPY_RATCHET_TRIGGER_PERCENT = 0.50         # Mulai aktif mengawal ketat saat koin choppy naik >= +0.50%
-CHOPPY_RATCHET_TRAIL_PERCENT = 0.20           # Jarak kawal rapat mepet (0.20% di belakang harga pucuk)
+CHOPPY_RATCHET_TRIGGER_PERCENT = 0.65         # Mulai aktif mengawal ketat saat koin choppy naik >= +0.50%
+CHOPPY_RATCHET_TRAIL_PERCENT = 0.45           # Jarak kawal rapat mepet (0.20% di belakang harga pucuk)
 MOONBAG_TARGET_USD = 20.0                    # Target puncak profit satu trade ($20 USD | ~+2.72% harga)
 
 # =============================================================================

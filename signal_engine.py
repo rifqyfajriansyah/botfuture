@@ -270,7 +270,7 @@ class SignalEngine:
         vol_sma = last.get("vol_sma", 0)
         
         # 1. 15m Trend Alignment: EMA 21 harus di atas atau memotong EMA 55
-        if ema_21 < ema_55 * 0.998:
+        if ema_21 <= ema_55:
             return False, 0, {"reason": "15m_ema_not_bullish"}
             
         vol_ratio = vol / vol_sma if vol_sma > 0 else 1.0
@@ -309,9 +309,12 @@ class SignalEngine:
         is_green_candle = last["close"] >= last["open"]
         is_engulfing = (last["close"] > prev["open"] and last["open"] <= prev["close"] and is_green_candle)
         
-        min_wick_ratio = getattr(config, "MIN_ENTRY_REJECTION_WICK_PERCENT", 22.0) / 100.0
-        if lower_wick_ratio < min_wick_ratio:
-            return False, 0, {"reason": f"weak_lower_wick_{lower_wick_ratio*100:.1f}%"}
+        prev_range = prev["high"] - prev["low"]
+        prev_lower_wick = (min(prev["open"], prev["close"]) - prev["low"]) / prev_range if prev_range > 0 else 0.0
+        min_wick_ratio = getattr(config, "MIN_ENTRY_REJECTION_WICK_PERCENT", 28.0) / 100.0
+        has_valid_wick = (lower_wick_ratio >= min_wick_ratio and is_green_candle) or (prev_lower_wick >= min_wick_ratio and (is_green_candle or lower_wick_ratio >= 0.15)) or (lower_wick_ratio >= 0.40)
+        if not has_valid_wick:
+            return False, 0, {"reason": f"weak_or_unconfirmed_lower_wick_{lower_wick_ratio*100:.1f}%"}
             
         if last["close"] < ema_21 * 0.998:
             return False, 0, {"reason": "close_below_ema21"}
@@ -364,7 +367,7 @@ class SignalEngine:
         vol_sma = last.get("vol_sma", 0)
         
         # 1. 15m Trend Alignment: EMA 21 harus di bawah atau memotong EMA 55
-        if ema_21 > ema_55 * 1.002:
+        if ema_21 >= ema_55:
             return False, 0, {"reason": "15m_ema_not_bearish"}
             
         vol_ratio = vol / vol_sma if vol_sma > 0 else 1.0
@@ -402,9 +405,12 @@ class SignalEngine:
         is_red_candle = last["close"] <= last["open"]
         is_engulfing = (last["close"] < prev["open"] and last["open"] >= prev["close"] and is_red_candle)
         
-        min_wick_ratio = getattr(config, "MIN_ENTRY_REJECTION_WICK_PERCENT", 22.0) / 100.0
-        if upper_wick_ratio < min_wick_ratio:
-            return False, 0, {"reason": f"weak_upper_wick_{upper_wick_ratio*100:.1f}%"}
+        prev_range = prev["high"] - prev["low"]
+        prev_upper_wick = (prev["high"] - max(prev["open"], prev["close"])) / prev_range if prev_range > 0 else 0.0
+        min_wick_ratio = getattr(config, "MIN_ENTRY_REJECTION_WICK_PERCENT", 28.0) / 100.0
+        has_valid_wick = (upper_wick_ratio >= min_wick_ratio and is_red_candle) or (prev_upper_wick >= min_wick_ratio and (is_red_candle or upper_wick_ratio >= 0.15)) or (upper_wick_ratio >= 0.40)
+        if not has_valid_wick:
+            return False, 0, {"reason": f"weak_or_unconfirmed_upper_wick_{upper_wick_ratio*100:.1f}%"}
             
         if last["close"] > ema_21 * 1.002:
             return False, 0, {"reason": "close_above_ema21"}
