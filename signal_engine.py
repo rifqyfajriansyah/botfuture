@@ -328,6 +328,13 @@ class SignalEngine:
         if vol_ratio < config.MIN_VOLUME_RATIO:
             return False, 0, {"reason": f"volume_too_low_{vol_ratio:.2f}x"}
             
+        # Directional Smart Money Guard: Anti-Dump Knife (Jangan LONG jika ada guyuran paus)
+        body_ratio = body / candle_range if candle_range > 0 else 0.0
+        if not is_green_candle and body_ratio > 0.50 and vol_ratio >= 1.2:
+            return False, 0, {"reason": f"dump_solid_red_bar_vol_{vol_ratio:.1f}x"}
+        if not is_green_candle and lower_wick_ratio < 0.20 and vol_ratio >= 1.5:
+            return False, 0, {"reason": f"dump_falling_knife_vol_{vol_ratio:.1f}x"}
+            
         # Scoring kalkulasi
         score = 80
         if lower_wick_ratio >= 0.45:
@@ -424,6 +431,13 @@ class SignalEngine:
         if vol_ratio < config.MIN_VOLUME_RATIO:
             return False, 0, {"reason": f"volume_too_low_{vol_ratio:.2f}x"}
             
+        # Directional Smart Money Guard: Anti-Pump Train (Jangan SHORT jika ada pompaan paus)
+        body_ratio = body / candle_range if candle_range > 0 else 0.0
+        if not is_red_candle and body_ratio > 0.50 and vol_ratio >= 1.2:
+            return False, 0, {"reason": f"pump_solid_green_bar_vol_{vol_ratio:.1f}x"}
+        if not is_red_candle and upper_wick_ratio < 0.20 and vol_ratio >= 1.2:
+            return False, 0, {"reason": f"pump_green_train_vol_{vol_ratio:.1f}x"}
+            
         # Scoring kalkulasi
         score = 80
         if upper_wick_ratio >= 0.45:
@@ -499,6 +513,11 @@ class SignalEngine:
                 # 2. Dilarang keras LONG saat BTC 15m sedang terjun payung (Anti tangkap pisau jatuh)
                 if can_long and (btc_15m_pct <= -0.25 or btc_rsi_15m < 38.0):
                     can_long = False
+                # 3. Dilarang keras SHORT di dasar jurang jenuh jual (Anti-rebound dead-cat)
+                btc_min_short_rsi = getattr(config, "BTC_MIN_SHORT_RSI", 28.0)
+                if can_short and btc_rsi_15m < btc_min_short_rsi:
+                    logger.info(f"🚫 SHORT {symbol} diblokir: BTC 15m RSI ({btc_rsi_15m:.1f}) oversold ekstrem (< {btc_min_short_rsi}), rawan rebound kilat!")
+                    can_short = False
                 
                 if btc_mode == "smart":
                     # 1. Jika BTC AKTIF Flash Crash / Dump (lock aktif): Blokir LONG mutlak!

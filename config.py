@@ -59,7 +59,8 @@ BTC_FILTER_MODE = "strict"                   # 'smart': Izinkan altcoin kuat (HT
 STRICT_HTF_REQUIRED = True                 # Izinkan koin decoupling yang punya tren 1H kuat
 
 # ENTRY 2.0 (BTC TRAFFIC LIGHT & REGIME CONFLUENCE - ANTI-GOJEK KETAT)
-BTC_CHOP_RSI_OVERSOLD = 42.0                # Jangan buka SHORT jika RSI 15m BTC < 42 (zona bawah rawan rebound dead-cat bounce)
+BTC_CHOP_RSI_OVERSOLD = 42.0
+BTC_MIN_SHORT_RSI = 28.0                    # Dilarang buka SHORT jika RSI 15m BTC < 28 (jenuh jual ekstrem rawan pantulan V-shape)
 BTC_CHOP_RSI_CRASH_FLOOR = 40.0             # DILARANG KERAS BUKA LONG jika RSI 15m BTC < 40 (pasar dingin/sedang dump parah)
 BTC_CHOP_RSI_OVERBOUGHT = 65.0              # Jangan buka LONG jika RSI 15m BTC > 65 (pucuk jenuh, rawan profit-taking)
 ANOMALY_MIN_SCORE = 90                      # Skor sinyal wajib >= 90 (Grade S) untuk boleh decoupling lawan arus BTC
