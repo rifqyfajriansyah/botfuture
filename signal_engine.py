@@ -432,7 +432,7 @@ class SignalEngine:
             return False, 0, {"reason": f"volume_too_low_{vol_ratio:.2f}x"}
             
         # Directional Smart Money Guard: Anti-Pump Train (Jangan SHORT jika ada pompaan paus)
-        body_ratio = body / candle_range if candle_range > 0 else 0.0
+        body_ratio = abs(last["close"] - last["open"]) / candle_range if candle_range > 0 else 0.0
         if not is_red_candle and body_ratio > 0.50 and vol_ratio >= 1.2:
             return False, 0, {"reason": f"pump_solid_green_bar_vol_{vol_ratio:.1f}x"}
         if not is_red_candle and upper_wick_ratio < 0.20 and vol_ratio >= 1.2:
