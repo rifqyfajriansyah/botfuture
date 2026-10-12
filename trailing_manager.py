@@ -24,9 +24,10 @@ from logger_setup import logger
 class TrailingManager:
     """Mengelola pro stepped trailing stop berdasarkan checkpoint profit."""
     
-    def __init__(self, order_manager, state_manager):
+    def __init__(self, order_manager, state_manager, signal_engine=None):
         self.order_mgr = order_manager
         self.state = state_manager
+        self.signal_engine = signal_engine
         self._cached_btcdom_time = 0
         self._cached_btcdom_change = 0.0
     
@@ -187,10 +188,14 @@ class TrailingManager:
         cp1_max = getattr(config, "TRAILING_FIRST_CHECKPOINT_MAX_PERCENT", 1.65)
         
         # Penyesuaian Dinamis Mode Choppy vs Gacor (Logika Cerdas User):
-        # Jika koin dalam mode Choppy (ADX < 22), CP1 diturunkan ke +0.95% agar cepat mengamankan uang dapur
+        # Jika koin dalam mode Choppy (ADX < 22) ATAU BTC Sideways/Chop, CP1 diturunkan ke +0.90% agar cepat mengamankan uang dapur
         adx_info = self._get_symbol_adx_info(symbol)
-        if adx_info.get("is_choppy", False) and getattr(config, "CHOPPY_AUTO_BEP_ENABLED", True):
-            cp1_min = getattr(config, "CHOPPY_CP1_PERCENT", 0.95)
+        is_btc_chop = False
+        if hasattr(self, "signal_engine") and self.signal_engine:
+            is_btc_chop = getattr(self.signal_engine, "_is_btc_chop", False)
+            
+        if (adx_info.get("is_choppy", False) or is_btc_chop) and getattr(config, "CHOPPY_AUTO_BEP_ENABLED", True):
+            cp1_min = getattr(config, "CHOPPY_CP1_PERCENT", 0.90)
             first_cp = round(max(0.85, min(cp1_max, cp1_min)), 2)
         else:
             first_cp = round(max(cp1_min, min(cp1_max, atr_pct * cp1_ratio)), 2)
@@ -337,19 +342,23 @@ class TrailingManager:
             else:
                 di_misaligned = (p_di > m_di * 1.15)
                 
-            is_choppy_regime = is_adx_choppy or di_misaligned
+            is_btc_chop = False
+            if hasattr(self, "signal_engine") and self.signal_engine:
+                is_btc_chop = getattr(self.signal_engine, "_is_btc_chop", False)
+                
+            is_choppy_regime = is_btc_chop or is_adx_choppy or di_misaligned
             
             if is_choppy_regime:
                 # 1. Evaluasi Target Cuan Harian (Compounding Snowball)
                 daily_pnl = self.state.get_daily_pnl()
-                available_bal = self.order_mgr.get_available_balance()
-                target_pct = getattr(config, "DAILY_TARGET_PROFIT_PERCENT", 10.0)
-                daily_target_usd = available_bal * (target_pct / 100.0)
+                daily_target_usd = self.state.get_or_init_daily_target_usd(
+                    current_equity=self.order_mgr.get_total_equity()
+                )
                 
                 # Mode kawal ketat aktif HANYA jika target harian belum tercapai
                 if daily_pnl < daily_target_usd:
-                    ratchet_trigger = getattr(config, "CHOPPY_RATCHET_TRIGGER_PERCENT", 0.50)
-                    ratchet_trail = getattr(config, "CHOPPY_RATCHET_TRAIL_PERCENT", 0.20)
+                    ratchet_trigger = getattr(config, "CHOPPY_RATCHET_TRIGGER_PERCENT", 0.42)
+                    ratchet_trail = getattr(config, "CHOPPY_RATCHET_TRAIL_PERCENT", 0.45)
                     highest_p = max(pos.get("highest_profit_pct", 0.0), profit_pct)
                     
                     if highest_p >= ratchet_trigger:
@@ -360,29 +369,56 @@ class TrailingManager:
                         # Kerek stop order naik jika level baru lebih tinggi minimal 0.04%
                         if desired_lock_pct > current_locked_pct + 0.04:
                             ratchet_stop_price = self.calculate_stop_price(entry_price, desired_lock_pct, side)
-                            if old_stop and old_stop.get("order_id"):
-                                self.order_mgr.cancel_stop_order(symbol, old_stop["order_id"])
-                                
-                            new_stop = self.order_mgr.place_stop_order(
-                                symbol=symbol,
-                                side=side,
-                                amount=pos.get("amount", amount),
-                                stop_price=ratchet_stop_price
-                            )
-                            if new_stop:
-                                self.state.set_trailing_stop(
-                                    stop_order_id=new_stop["id"],
-                                    stop_price=ratchet_stop_price,
-                                    checkpoint_level=desired_lock_pct
+                            is_stop_valid = (current_price > ratchet_stop_price) if side == "long" else (current_price < ratchet_stop_price)
+                            
+                            if is_stop_valid:
+                                if old_stop and old_stop.get("order_id"):
+                                    self.order_mgr.cancel_stop_order(symbol, old_stop["order_id"])
+                                    
+                                new_stop = self.order_mgr.place_stop_order(
+                                    symbol=symbol,
+                                    side=side,
+                                    amount=pos.get("amount", amount),
+                                    stop_price=ratchet_stop_price
                                 )
+                                if new_stop:
+                                    self.state.set_trailing_stop(
+                                        stop_order_id=new_stop["id"],
+                                        stop_price=ratchet_stop_price,
+                                        checkpoint_level=desired_lock_pct
+                                    )
+                                    pos["choppy_ratchet_locked_pct"] = desired_lock_pct
+                                    pos["choppy_bep_locked"] = True
+                                    self.state.save()
+                                    logger.info(
+                                        f"🪜 CHOPPY STEPPED RATCHET LOCKED for {symbol}! "
+                                        f"Peak: +{highest_p:.2f}% (trailed -{ratchet_trail:.2f}%) ➔ Stop Locked @ {ratchet_stop_price} (+{desired_lock_pct}%). "
+                                        f"Target Harian: ${daily_pnl:.2f}/${daily_target_usd:.2f} USDT!"
+                                    )
+                            else:
+                                # Jika harga pasar saat ini sudah terlanjur di bawah ratchet stop,
+                                # tandai level agar tidak looping spam & pulihkan Emergency SL jika belum aktif
                                 pos["choppy_ratchet_locked_pct"] = desired_lock_pct
-                                pos["choppy_bep_locked"] = True
                                 self.state.save()
-                                logger.info(
-                                    f"🪜 CHOPPY STEPPED RATCHET LOCKED for {symbol}! "
-                                    f"Peak: +{highest_p:.2f}% (trailed -{ratchet_trail:.2f}%) ➔ Stop Locked @ {ratchet_stop_price} (+{desired_lock_pct}%). "
-                                    f"Target Harian: ${daily_pnl:.2f}/${daily_target_usd:.2f} USDT!"
+                                logger.warning(
+                                    f"⚠️ Ratchet stop @ {ratchet_stop_price:.4f} (+{desired_lock_pct}%) sudah terlewati "
+                                    f"oleh harga pasar {current_price:.4f} ({symbol}). Menjaga posisi aman dengan Emergency SL."
                                 )
+                                sl_pct = getattr(config, "EMERGENCY_SL_PERCENT", 18.0)
+                                sl_price = entry_price * (1 - sl_pct / 100.0) if side == "long" else entry_price * (1 + sl_pct / 100.0)
+                                em_stop = self.order_mgr.place_stop_order(
+                                    symbol=symbol,
+                                    side=side,
+                                    amount=pos.get("amount", amount),
+                                    stop_price=sl_price
+                                )
+                                if em_stop:
+                                    self.state.set_trailing_stop(
+                                        stop_order_id=em_stop["id"],
+                                        stop_price=sl_price,
+                                        checkpoint_level=0
+                                    )
+                                    logger.info(f"✅ Emergency SL dipulihkan di {sl_price:.4f} ID: {em_stop['id']}")
 
                 # 2. Pengaman BEP Dasar (jika belum kena ratchet tapi sudah >= bep_trigger)
                 bep_trigger = getattr(config, "CHOPPY_BEP_TRIGGER_PERCENT", 0.55)

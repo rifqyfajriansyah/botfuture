@@ -19,7 +19,7 @@ TRADING_MODE = os.getenv("TRADING_MODE", "testnet")  # 'live' atau 'testnet'
 # =============================================================================
 # TRADING PARAMETERS
 # =============================================================================
-LEVERAGE = 3                    # Leverage 3x (Gold Standard)
+LEVERAGE = 3                    # Leverage 3x (Aman & terkontrol)
 MARGIN_MODE = "isolated"        # Isolated margin (lebih aman per posisi)
 BALANCE_USAGE = 0.90            # Gunakan 90% balance (maksimalisasi profit dengan entry terfilter ketat)
 MAX_POSITIONS = 1               # Hanya 1 posisi aktif
@@ -46,7 +46,8 @@ COMBAT_TRIGGER_DRAWDOWN = -0.40         # Masuk mode siaga cepat jika drawdown <
 # =============================================================================
 # ENTRY RISK GATEKEEPER (Anti-Pucuk & Filter Kualitas Sinyal)
 # =============================================================================
-MIN_ENTRY_REJECTION_WICK_PERCENT = 28.0     # Wajib ada jarum penolakan minimal 22% (momentum kuat seringkali wick 20-25%)
+MIN_ENTRY_REJECTION_WICK_PERCENT = 18.0     # Ambang batas wick minimal >= 18.0% (terbukti empiris membuang 71 trade kalah & net PnL +$67.85)
+CHOP_MIN_REJECTION_WICK_PERCENT = 18.0      # Ambang batas wick ketat anti-jebakan saat BTC Sideways/Chop
 MAX_ENTRY_RISK_EMA55_PERCENT = 1.35         # Maksimal jarak harga entry ke support EMA 55 hanya 0.88% (anti resiko tebal, cutloss kecil)
 ANTI_CLIMAX_LOOKBACK_CANDLES = 8            # Pantau 8 candle terakhir (2 jam)
 ANTI_CLIMAX_MAX_RSI = 70.0                  # Dilarang masuk LONG jika dalam 2 jam terakhir baru saja overbought > 70
@@ -55,12 +56,19 @@ BTC_FILTER_ENABLED = True                   # Pantau arah Bitcoin sebelum tradin
 BTC_SYMBOL = "BTC/USDT"                     # Benchmark koin induk
 BTC_FLASH_DUMP_THRESHOLD_PERCENT = 0.55     # BTC flash dump aktif jika lilin 15m drop >= -0.55% (nyata, bukan goyangan $200)
 BTC_FLASH_LOCK_MINUTES = 15                 # Kunci proteksi flash dump/pump selama 15m (anti-whipsaw / kedipan micro)
-BTC_FILTER_MODE = "strict"                   # 'smart': Izinkan altcoin kuat (HTF selaras) saat BTC tenang/sideways, blokir mutlak saat BTC flash dump/pump aktif
+BTC_FILTER_MODE = "smart"                    # 'smart': Izinkan altcoin kuat (HTF selaras) saat BTC tenang/sideways, blokir mutlak saat BTC flash dump/pump aktif
 STRICT_HTF_REQUIRED = True                 # Izinkan koin decoupling yang punya tren 1H kuat
 
-# ENTRY 2.0 (BTC TRAFFIC LIGHT & REGIME CONFLUENCE - ANTI-GOJEK KETAT)
-BTC_CHOP_RSI_OVERSOLD = 42.0
-BTC_MIN_SHORT_RSI = 28.0                    # Dilarang buka SHORT jika RSI 15m BTC < 28 (jenuh jual ekstrem rawan pantulan V-shape)
+# BTC 1H CHOP / SIDEWAYS REGIME DETECTION (VALIDASI 218 HISTORICAL TRADES: +$168.73 USDT NET GAIN)
+BTC_CHOP_1H_RANGE_MAX = 0.80               # Maksimum rentang lilin 1H BTC (High - Low)/Close (%) untuk Chop Zone
+BTC_CHOP_3H_DISP_MAX = 0.80                # Maksimum perpindahan harga net 3 jam terakhir (%) untuk Chop Zone
+CHOP_MIN_VOLUME_RATIO = 1.00               # Saat BTC Sideways/Chop, altcoin WAJIB punya volume >= 1.0x (validasi Smart Money)
+
+# ENTRY 2.0 (BTC MICRO-REBOUND & MICRO-SLIP GUARD - ZONA EMAS BACKTEST 0.14%)
+BTC_REBOUND_MAX_15M_PCT = 0.14              # Dilarang SHORT jika lilin 15m BTC sedang memantul naik >= +0.14% (anti keseret pantulan)
+BTC_SLIP_MAX_15M_PCT = 0.14                 # Dilarang LONG jika lilin 15m BTC sedang longsor turun <= -0.14% (anti pisau jatuh)
+BTC_CHOP_RSI_OVERSOLD = 42.0                # Jangan buka SHORT jika RSI 15m BTC < 42 (zona bawah rawan rebound dead-cat bounce)
+BTC_MIN_SHORT_RSI = 32.0                    # Dilarang buka SHORT jika RSI 15m BTC < 32 (jenuh jual di dasar support rawan memantul)
 BTC_CHOP_RSI_CRASH_FLOOR = 40.0             # DILARANG KERAS BUKA LONG jika RSI 15m BTC < 40 (pasar dingin/sedang dump parah)
 BTC_CHOP_RSI_OVERBOUGHT = 65.0              # Jangan buka LONG jika RSI 15m BTC > 65 (pucuk jenuh, rawan profit-taking)
 ANOMALY_MIN_SCORE = 90                      # Skor sinyal wajib >= 90 (Grade S) untuk boleh decoupling lawan arus BTC
@@ -186,14 +194,14 @@ CHOPPY_AUTO_BEP_ENABLED = True
 CHOPPY_ADX_THRESHOLD = 22.0                  # Batas ADX 15m koin: di bawah 22.0 diklasifikasikan sebagai Choppy/Lemas
 CHOPPY_BEP_TRIGGER_PERCENT = 0.55            # Floating profit minimal +0.55% untuk langsung kunci stop ke BEP
 CHOPPY_BEP_LOCK_PERCENT = 0.12               # Level stop BEP yang dikunci (+0.12% untuk menutup biaya trading fee)
-CHOPPY_CP1_PERCENT = 0.95                    # Target Partial TP 1 koin choppy (+0.95%) agar cepat bungkus profit
+CHOPPY_CP1_PERCENT = 0.90                    # Target Partial TP 1 koin choppy (+0.90%) agar cepat bungkus profit
 
 # =============================================================================
 # TARGET DISIPLIN HARIAN (COMPOUNDING SNOWBALL) & STEPPED RATCHET CHOPPY
 # =============================================================================
 DAILY_TARGET_PROFIT_PERCENT = 10.0            # Target cuan harian dinamis (10% dari modal akun)
-CHOPPY_RATCHET_TRIGGER_PERCENT = 0.65         # Mulai aktif mengawal ketat saat koin choppy naik >= +0.50%
-CHOPPY_RATCHET_TRAIL_PERCENT = 0.45           # Jarak kawal rapat mepet (0.20% di belakang harga pucuk)
+CHOPPY_RATCHET_TRIGGER_PERCENT = 0.42         # Mulai aktif mengawal ketat saat koin choppy naik >= +0.50%
+CHOPPY_RATCHET_TRAIL_PERCENT = 0.30           # Jarak kawal bernapas (0.30% di belakang harga pucuk, mengunci cuan saat choppy)
 MOONBAG_TARGET_USD = 20.0                    # Target puncak profit satu trade ($20 USD | ~+2.72% harga)
 
 # =============================================================================
@@ -253,7 +261,13 @@ MAX_STAGNANT_MIN_PROFIT_PERCENT = 0.2
 # - Saat koin sempat drop (dip) lalu MANTUL naik, kita amati kekuatannya.
 # - Jika setelah mantul harga gagal tembus entry (tertahan resisten) dan mulai melorot kembali,
 #   bot langsung tebas potong rugi saat itu juga sebelum minusnya membengkak kembali ke dasar jurang!
+# - DEAD-CAT BOUNCE TEBAS PREMATUR:
+#   Hasil bedah 228 trade membuktikan bahwa tebas pasar prematur pada goyangan jarum -0.7% s/d -0.9%
+#   menyebabkan kekalahan 30 trade beruntun (-$229.66 USDT), dan koin-koin juara (NIGHT, MANA, CTSI, STRK)
+#   langsung meledak cuan +2% s/d +15% tepat setelah dipotong!
+#   Maka DEAD_CAT_BOUNCE_CUT_ENABLED dimatikan agar koin bernafas membuktikan arahnya.
 BOUNCE_FAILURE_GUARD_ENABLED = True
+DEAD_CAT_BOUNCE_CUT_ENABLED = False              # Nonaktifkan tebas prematur saat wick goyang biasa!
 BOUNCE_FAILURE_REQUIRE_EMA55_TEST = True     # Rem hanya aktif jika harga sudah menguji/menusuk ke batas lantai EMA 55 (Safe Pocket)
 BOUNCE_FAILURE_EMA_BUFFER_PERCENT = 0.52     # Toleransi buffer lantai EMA 55 (0.52% di bawah/atas EMA 55)
 BOUNCE_FAILURE_MIN_DRAWDOWN_PERCENT = -0.90  # Drawdown minimal terhadap entry untuk konfirmasi dip nyata
@@ -261,6 +275,15 @@ BOUNCE_FAILURE_MIN_REBOUND_PERCENT = 0.35    # Sempat berhasil mantul naik minim
 BOUNCE_FAILURE_SLIPPAGE_TOLERANCE = 0.25     # Jika setelah mantul harga melorot kembali >= 0.25% dari puncak pantulan -> TEBAS!
 BOUNCE_FAILURE_MAX_LOSS_PERCENT = -1.15      # Batas minus harga maksimal (-1.15% harga | ~ -3.45% ROE di 3x) setelah tembus batas EMA 55
 MAX_LOSS_USDT_CAP = -8.80                    # Batas kerugian dolar nominal maksimal (-$8.80 USDT) setelah tembus batas EMA 55
+
+# =============================================================================
+# FLEXIBLE MACRO LIQUIDITY GATE (BTC + BTCDOM ADAPTIVE)
+# =============================================================================
+FLEXIBLE_MACRO_ENABLED = True                    # Aktifkan perisai makro likuiditas adaptif
+DOM_SYMBOL = "BTCDOM/USDT"                       # Simbol dominansi BTC
+MACRO_ADVERSE_MIN_SCORE = 90                     # Syarat score minimal jika melawan arah makro
+MACRO_ADVERSE_MIN_VOL_RATIO = 1.35               # Syarat lonjakan volume minimal jika melawan makro
+MACRO_ADVERSE_EXTRA_OFFSET = 0.20                # Tambahan diskon limit order (+0.20%) saat lawan arah makro
 
 # =============================================================================
 # PANIC VOLUME DUMP CUT (Deteksi Air Terjun vs Gojekan Jarum di Lilin 1m)
@@ -288,7 +311,7 @@ TRAILING_CHECKPOINT_PERCENT = 2.0
 # EMERGENCY STOP LOSS (Safety Net - Anti Likuidasi)
 # =============================================================================
 EMERGENCY_SL_ENABLED = True         # Safety net aktif (jauh agar tidak kejilat wick)
-EMERGENCY_SL_PERCENT = 25.0         # Pasang di -25% (sebelum likuidasi leverage 3x ~33%)
+EMERGENCY_SL_PERCENT = 18.0         # Pasang di -25% (sebelum likuidasi leverage 3x ~33%)
 
 # =============================================================================
 # SIGNAL ENGINE SETTINGS (Institutional TPLR)
@@ -320,7 +343,8 @@ ADX_BREAKOUT_VOL_RATIO = 1.50   # Batas volume ledakan untuk aktivasi toleransi 
 
 # Volume
 VOLUME_SMA_PERIOD = 20
-MIN_VOLUME_RATIO = 0.80         # Minimal volume 1.15x dari average 20 SMA (Smart Money validasi)
+MIN_VOLUME_RATIO = 0.80         # Minimal volume 0.80x dari average 20 SMA (Smart Money validasi)
+MAX_PULLBACK_VOLUME_RATIO = 3.20 # Batas atas volume lilin entry (mencegah buying/selling climax trap & whale dump)
 
 # Timeframes & Confirmation
 TRADING_TIMEFRAME = "15m"       # Timeframe utama (15m cepat & responsif)
@@ -352,6 +376,7 @@ BLACKLIST_COINS = [
 
     # High-volatility political memecoins / High-risk wicks
     "TRUMP/USDT", "TRUMP",
+    "龙虾/USDT", "龙虾",  # High-spread volatile meme
 
     # TradFi Perpetuals & Gold/Commodity Perps (Emas / Bukan Crypto Asli)
     "PAXG/USDT", "PAXG",
