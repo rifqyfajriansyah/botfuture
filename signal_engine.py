@@ -506,17 +506,23 @@ class SignalEngine:
                 btc_rsi_15m = self._get_btc_rsi_15m()
                 btc_15m_pct = getattr(self, "_cached_btc_15m_pct", 0.0)
                 
-                # Anti-Suicide Guard (Simetris & Selaras Tren BTC):
-                # 1. Dilarang keras SHORT saat BTC 15m sedang lonjak naik kencang (Anti-suicide pump)
-                if can_short and (btc_15m_pct >= 0.25 or btc_rsi_15m > 60.0):
+                # Anti-Suicide Guard (Simetris & Selaras Tren BTC - Confluence Guard 0.14%):
+                # 1. Dilarang keras SHORT saat BTC 15m sedang lonjak/memantul naik (Anti-suicide pump / rebound guard)
+                btc_rebound_max = getattr(config, "BTC_REBOUND_MAX_15M_PCT", 0.14)
+                if can_short and (btc_15m_pct >= btc_rebound_max or btc_rsi_15m > 60.0):
+                    r_str = f"lilin 15m (+{btc_15m_pct:.2f}% >= +{btc_rebound_max}%)" if btc_15m_pct >= btc_rebound_max else f"RSI 15m kuat ({btc_rsi_15m:.1f} > 60)"
+                    logger.info(f"🚫 SHORT {symbol} diblokir: BTC sedang menguat ({r_str}), rawan keseret pump!")
                     can_short = False
                 # 2. Dilarang keras LONG saat BTC 15m sedang terjun payung (Anti tangkap pisau jatuh)
-                if can_long and (btc_15m_pct <= -0.25 or btc_rsi_15m < 38.0):
+                btc_slip_max = getattr(config, "BTC_SLIP_MAX_15M_PCT", 0.14)
+                if can_long and (btc_15m_pct <= -btc_slip_max or btc_rsi_15m < 38.0):
+                    r_str = f"lilin 15m (-{abs(btc_15m_pct):.2f}% <= -{btc_slip_max}%)" if btc_15m_pct <= -btc_slip_max else f"RSI 15m lemah ({btc_rsi_15m:.1f} < 38)"
+                    logger.info(f"🚫 LONG {symbol} diblokir: BTC sedang longsor ({r_str}), rawan pisau jatuh!")
                     can_long = False
                 # 3. Dilarang keras SHORT di dasar jurang jenuh jual (Anti-rebound dead-cat)
-                btc_min_short_rsi = getattr(config, "BTC_MIN_SHORT_RSI", 28.0)
+                btc_min_short_rsi = getattr(config, "BTC_MIN_SHORT_RSI", 32.0)
                 if can_short and btc_rsi_15m < btc_min_short_rsi:
-                    logger.info(f"🚫 SHORT {symbol} diblokir: BTC 15m RSI ({btc_rsi_15m:.1f}) oversold ekstrem (< {btc_min_short_rsi}), rawan rebound kilat!")
+                    logger.info(f"🚫 SHORT {symbol} diblokir: BTC 15m RSI ({btc_rsi_15m:.1f}) oversold (< {btc_min_short_rsi}), rawan rebound kilat!")
                     can_short = False
                 
                 if btc_mode == "smart":
