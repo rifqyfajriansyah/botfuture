@@ -293,8 +293,8 @@ BOUNCE_FAILURE_EMA_BUFFER_PERCENT = 0.52     # Toleransi buffer lantai EMA 55 (0
 BOUNCE_FAILURE_MIN_DRAWDOWN_PERCENT = -0.90  # Drawdown minimal terhadap entry untuk konfirmasi dip nyata
 BOUNCE_FAILURE_MIN_REBOUND_PERCENT = 0.35    # Sempat berhasil mantul naik minimal +0.35% harga dari dasar jurang
 BOUNCE_FAILURE_SLIPPAGE_TOLERANCE = 0.25     # Jika setelah mantul harga melorot kembali >= 0.25% dari puncak pantulan -> TEBAS!
-BOUNCE_FAILURE_MAX_LOSS_PERCENT = -0.85      # Batas minus harga maksimal keras (-0.85% harga | rugi mentok ~$3.30, anti tembus -$5)
-MAX_LOSS_USDT_CAP = -3.80                    # Batas kerugian dolar nominal maksimal (-$3.80 USDT) mutlak!
+BOUNCE_FAILURE_MAX_LOSS_PERCENT = -1.05      # Batas minus harga maksimal keras (-1.05% harga | Sweet Spot anti-wick gojekan, rugi mentok ~$3.90)
+MAX_LOSS_USDT_CAP = -4.20                    # Batas kerugian dolar nominal maksimal (-$4.20 USDT) mutlak!
 
 # =============================================================================
 # FLEXIBLE MACRO LIQUIDITY GATE (BTC + BTCDOM ADAPTIVE)

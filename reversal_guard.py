@@ -192,8 +192,8 @@ class ReversalGuard:
                     min_drawdown = getattr(config, "BOUNCE_FAILURE_MIN_DRAWDOWN_PERCENT", -0.75)
                     min_rebound = getattr(config, "BOUNCE_FAILURE_MIN_REBOUND_PERCENT", 0.35)
                     slip_tol = getattr(config, "BOUNCE_FAILURE_SLIPPAGE_TOLERANCE", 0.25)
-                    max_loss_pct = getattr(config, "BOUNCE_FAILURE_MAX_LOSS_PERCENT", -0.85)
-                    max_loss_usdt = getattr(config, "MAX_LOSS_USDT_CAP", -3.80)
+                    max_loss_pct = getattr(config, "BOUNCE_FAILURE_MAX_LOSS_PERCENT", -1.05)
+                    max_loss_usdt = getattr(config, "MAX_LOSS_USDT_CAP", -4.20)
                     
                     # Kondisi Dead-Cat Bounce yang Valid:
                     # 1. Pernah mengalami drawdown minimal (lowest_pct <= min_drawdown)
