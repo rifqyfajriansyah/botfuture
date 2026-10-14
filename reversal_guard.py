@@ -8,6 +8,7 @@ Otomatis close posisi saat signal berbalik arah.
 """
 
 import time
+from datetime import datetime
 import config
 from logger_setup import logger
 
@@ -109,7 +110,75 @@ class ReversalGuard:
             except Exception as e:
                 logger.error(f"❌ Error during exhaustion guard check: {e}")
         
-        # 1b. CEK BOUNCE FAILURE GUARD (Dead-Cat Bounce Rejection Cut)
+        # 1b. CEK STAGNATION GUARDS (Lapis 1: Stagnant Early Cut & Lapis 2: Time-Stop > 50 Menit)
+        entry_time_str = pos.get("entry_time")
+        if entry_time_str:
+            try:
+                entry_dt = datetime.fromisoformat(entry_time_str)
+                elapsed_minutes = (datetime.now() - entry_dt).total_seconds() / 60.0
+                entry_price_val = float(pos.get("entry_price", 0))
+                current_price_val = self.order_mgr.get_current_price(symbol)
+                
+                if entry_price_val > 0 and current_price_val > 0:
+                    profit_pct_val = ((current_price_val - entry_price_val) / entry_price_val * 100.0) if side == "long" else ((entry_price_val - current_price_val) / entry_price_val * 100.0)
+                    highest_p_val = float(pos.get("highest_profit_pct", 0.0) or 0.0)
+                    
+                    # LAPIS 1: STAGNANT EARLY CUT (20 Menit, Koin Mandul Tak Pernah Naik & Anjlok <= -0.60%)
+                    if getattr(config, "STAGNANT_EARLY_CUT_ENABLED", True):
+                        early_min = getattr(config, "STAGNANT_EARLY_CUT_MINUTES", 20)
+                        max_hp = getattr(config, "STAGNANT_EARLY_CUT_MAX_HP", 0.20)
+                        loss_thresh = getattr(config, "STAGNANT_EARLY_CUT_LOSS_THRESHOLD", -0.60)
+                        
+                        if elapsed_minutes >= early_min and highest_p_val < max_hp and profit_pct_val <= loss_thresh:
+                            logger.warning(
+                                f"⏳ STAGNANT EARLY CUT TRIGGERED for {symbol}! "
+                                f"Durasi: {elapsed_minutes:.1f}m >= {early_min}m | "
+                                f"Highest: +{highest_p_val:.2f}% (< {max_hp}%) | "
+                                f"Profit: {profit_pct_val:.2f}% (<= {loss_thresh}%). "
+                                f"Koin terbukti mandul & gagal merespons sinyal. Tebas cepat untuk selamatkan modal!"
+                            )
+                            self.trailing_mgr.remove_stop(symbol)
+                            close_res = self.order_mgr.close_position(
+                                symbol=symbol,
+                                side=side,
+                                amount=pos["amount"],
+                                reason=f"stagnant_early_cut ({profit_pct_val:.2f}% | {elapsed_minutes:.0f}m)"
+                            )
+                            if close_res:
+                                result["action"] = "closed"
+                                result["reason"] = "stagnant_early_cut"
+                                result["details"] = {"profit_pct": profit_pct_val, "elapsed_minutes": elapsed_minutes}
+                                return result
+
+                    # LAPIS 2: ABSOLUTE STAGNATION TIME-STOP (> 50 Menit, Masih Merah Tanpa Daya Dorong)
+                    if getattr(config, "STAGNANT_TIMESTOP_ENABLED", True):
+                        timestop_min = getattr(config, "STAGNANT_TIMESTOP_MINUTES", 50)
+                        timestop_max_loss = getattr(config, "STAGNANT_TIMESTOP_MAX_LOSS", 0.0)
+                        timestop_max_hp = getattr(config, "STAGNANT_TIMESTOP_MAX_HP", 0.40)
+                        
+                        if elapsed_minutes >= timestop_min and profit_pct_val < timestop_max_loss and highest_p_val < timestop_max_hp:
+                            logger.warning(
+                                f"⏰ STAGNATION TIME-STOP TRIGGERED for {symbol}! "
+                                f"Durasi: {elapsed_minutes:.1f}m >= {timestop_min}m (> 3 lilin 15m) | "
+                                f"Profit: {profit_pct_val:.2f}% | Highest: +{highest_p_val:.2f}%. "
+                                f"Koin tersandera di zona merah tanpa momentum. Bebaskan margin untuk koin baru!"
+                            )
+                            self.trailing_mgr.remove_stop(symbol)
+                            close_res = self.order_mgr.close_position(
+                                symbol=symbol,
+                                side=side,
+                                amount=pos["amount"],
+                                reason=f"stagnant_timestop_50m ({profit_pct_val:.2f}%)"
+                            )
+                            if close_res:
+                                result["action"] = "closed"
+                                result["reason"] = "stagnant_timestop_50m"
+                                result["details"] = {"profit_pct": profit_pct_val, "elapsed_minutes": elapsed_minutes}
+                                return result
+            except Exception as e_stag:
+                logger.debug(f"Stagnation guard check error: {e_stag}")
+
+        # 1c. CEK BOUNCE FAILURE GUARD (Dead-Cat Bounce Rejection Cut & Hard Loss Cap)
         if getattr(config, "BOUNCE_FAILURE_GUARD_ENABLED", False):
             try:
                 entry_price = float(pos.get("entry_price", 0))
@@ -123,8 +192,8 @@ class ReversalGuard:
                     min_drawdown = getattr(config, "BOUNCE_FAILURE_MIN_DRAWDOWN_PERCENT", -0.75)
                     min_rebound = getattr(config, "BOUNCE_FAILURE_MIN_REBOUND_PERCENT", 0.35)
                     slip_tol = getattr(config, "BOUNCE_FAILURE_SLIPPAGE_TOLERANCE", 0.25)
-                    max_loss_pct = getattr(config, "BOUNCE_FAILURE_MAX_LOSS_PERCENT", -1.15)
-                    max_loss_usdt = getattr(config, "MAX_LOSS_USDT_CAP", -8.80)
+                    max_loss_pct = getattr(config, "BOUNCE_FAILURE_MAX_LOSS_PERCENT", -0.85)
+                    max_loss_usdt = getattr(config, "MAX_LOSS_USDT_CAP", -3.80)
                     
                     # Kondisi Dead-Cat Bounce yang Valid:
                     # 1. Pernah mengalami drawdown minimal (lowest_pct <= min_drawdown)

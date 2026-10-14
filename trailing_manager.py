@@ -166,10 +166,19 @@ class TrailingManager:
             return {"adx": 25.0, "plus_di": 20.0, "minus_di": 20.0, "is_choppy": False}
 
     def get_dynamic_tp_target(self, symbol):
-        """Hitung target partial TP dinamis berdasarkan ATR koin."""
+        """Hitung target partial TP dinamis berdasarkan ATR koin dan regime pasar."""
         if not getattr(config, "DYNAMIC_TP_ENABLED", True):
             return getattr(config, "PARTIAL_TP_PERCENT", 2.42)
             
+        # Jika dalam mode Choppy (ADX < 22 atau BTC Sideways), gunakan target TP1 Choppy (+0.85%)
+        adx_info = self._get_symbol_adx_info(symbol)
+        is_btc_chop = False
+        if hasattr(self, "signal_engine") and self.signal_engine:
+            is_btc_chop = getattr(self.signal_engine, "_is_btc_chop", False)
+            
+        if (adx_info.get("is_choppy", False) or is_btc_chop) and getattr(config, "CHOPPY_AUTO_BEP_ENABLED", True):
+            return getattr(config, "CHOPPY_TP1_PERCENT", 0.85)
+
         atr_pct = self._get_symbol_atr_pct(symbol)
         mult = getattr(config, "DYNAMIC_TP_ATR_MULTIPLIER", 2.2)
         min_p = getattr(config, "DYNAMIC_TP_MIN_PERCENT", 1.75)
@@ -349,7 +358,41 @@ class TrailingManager:
             is_choppy_regime = is_btc_chop or is_adx_choppy or di_misaligned
             
             if is_choppy_regime:
-                # 1. Evaluasi Target Cuan Harian (Compounding Snowball)
+                # 1. PENGAMAN BEP MURNI BERNAFAS (Aktif di +0.50% -> Kunci +0.08% cover fee)
+                # Filosofi: Modal 100% aman, tetapi memberi ruang napas longgar agar tidak tercekik di pucuk bawah!
+                bep_trigger = getattr(config, "CHOPPY_BEP_TRIGGER_PERCENT", 0.50)
+                bep_lock = getattr(config, "CHOPPY_BEP_LOCK_PERCENT", 0.08)
+                if profit_pct >= bep_trigger and not pos.get("choppy_bep_locked", False):
+                    current_cp = self.state.get_current_checkpoint()
+                    if current_cp is None or current_cp < bep_trigger:
+                        bep_stop_price = self.calculate_stop_price(entry_price, bep_lock, side)
+                        is_stop_valid = (current_price > bep_stop_price) if side == "long" else (current_price < bep_stop_price)
+                        if is_stop_valid:
+                            if old_stop and old_stop.get("order_id"):
+                                self.order_mgr.cancel_stop_order(symbol, old_stop["order_id"])
+                                
+                            new_stop = self.order_mgr.place_stop_order(
+                                symbol=symbol,
+                                side=side,
+                                amount=pos.get("amount", amount),
+                                stop_price=bep_stop_price
+                            )
+                            if new_stop:
+                                self.state.set_trailing_stop(
+                                    stop_order_id=new_stop["id"],
+                                    stop_price=bep_stop_price,
+                                    checkpoint_level=bep_trigger
+                                )
+                                pos["choppy_bep_locked"] = True
+                                pos["choppy_ratchet_locked_pct"] = bep_lock
+                                self.state.save()
+                                logger.info(
+                                    f"🛡️ CHOPPY BEP BREATHING ROOM ACTIVATED for {symbol}! "
+                                    f"Profit: +{profit_pct:.2f}% >= +{bep_trigger}% | "
+                                    f"Physical Stop Locked @ {bep_stop_price} (+{bep_lock}% cover fee). MODAL 100% AMAN BEBAS RESIKO!"
+                                )
+
+                # 2. STEPPED RATCHET CHOPPY (Mulai trailing ketat SETELAH TP1 di +0.85% diambil)
                 daily_pnl = self.state.get_daily_pnl()
                 daily_target_usd = self.state.get_or_init_daily_target_usd(
                     current_equity=self.order_mgr.get_total_equity()
@@ -357,7 +400,7 @@ class TrailingManager:
                 
                 # Mode kawal ketat aktif HANYA jika target harian belum tercapai
                 if daily_pnl < daily_target_usd:
-                    ratchet_trigger = getattr(config, "CHOPPY_RATCHET_TRIGGER_PERCENT", 0.42)
+                    ratchet_trigger = getattr(config, "CHOPPY_RATCHET_TRIGGER_PERCENT", 0.85)
                     ratchet_trail = getattr(config, "CHOPPY_RATCHET_TRAIL_PERCENT", 0.45)
                     highest_p = max(pos.get("highest_profit_pct", 0.0), profit_pct)
                     
@@ -419,36 +462,6 @@ class TrailingManager:
                                         checkpoint_level=0
                                     )
                                     logger.info(f"✅ Emergency SL dipulihkan di {sl_price:.4f} ID: {em_stop['id']}")
-
-                # 2. Pengaman BEP Dasar (jika belum kena ratchet tapi sudah >= bep_trigger)
-                bep_trigger = getattr(config, "CHOPPY_BEP_TRIGGER_PERCENT", 0.55)
-                bep_lock = getattr(config, "CHOPPY_BEP_LOCK_PERCENT", 0.12)
-                if profit_pct >= bep_trigger and not pos.get("choppy_bep_locked", False):
-                    current_cp = self.state.get_current_checkpoint()
-                    if current_cp is None or current_cp < bep_trigger:
-                        bep_stop_price = self.calculate_stop_price(entry_price, bep_lock, side)
-                        if old_stop and old_stop.get("order_id"):
-                            self.order_mgr.cancel_stop_order(symbol, old_stop["order_id"])
-                            
-                        new_stop = self.order_mgr.place_stop_order(
-                            symbol=symbol,
-                            side=side,
-                            amount=pos.get("amount", amount),
-                            stop_price=bep_stop_price
-                        )
-                        if new_stop:
-                            self.state.set_trailing_stop(
-                                stop_order_id=new_stop["id"],
-                                stop_price=bep_stop_price,
-                                checkpoint_level=bep_trigger
-                            )
-                            pos["choppy_bep_locked"] = True
-                            self.state.save()
-                            logger.info(
-                                f"🛡️ CHOPPY AUTO-BEP ACTIVATED for {symbol}! "
-                                f"Profit: +{profit_pct:.2f}% >= +{bep_trigger}% | ADX: {adx_info['adx']:.1f} | "
-                                f"Physical Stop Locked @ {bep_stop_price} (+{bep_lock}%). MODAL 100% UTUH BEBAS RESIKO!"
-                            )
 
         if getattr(config, "PARTIAL_TP_ENABLED", True) and not pos.get("partial_tp_done", False):
             # Target TP Dinamis Adaptif ATR koin

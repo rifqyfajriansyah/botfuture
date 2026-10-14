@@ -46,8 +46,11 @@ COMBAT_TRIGGER_DRAWDOWN = -0.40         # Masuk mode siaga cepat jika drawdown <
 # =============================================================================
 # ENTRY RISK GATEKEEPER (Anti-Pucuk & Filter Kualitas Sinyal)
 # =============================================================================
-MIN_ENTRY_REJECTION_WICK_PERCENT = 18.0     # Ambang batas wick minimal >= 18.0% (terbukti empiris membuang 71 trade kalah & net PnL +$67.85)
-CHOP_MIN_REJECTION_WICK_PERCENT = 18.0      # Ambang batas wick ketat anti-jebakan saat BTC Sideways/Chop
+MIN_ENTRY_REJECTION_WICK_PERCENT = 8.8      # Ambang batas wick minimal saat pasar Trend (8.8%)
+CHOP_MIN_REJECTION_WICK_PERCENT = 18.0       # Ambang batas wick ketat anti-jebakan saat BTC Sideways/Chop (18.0%)
+WHALE_RESCUE_VOLUME_RATIO = 1.80             # Pintu VIP Paus: Ledakan volume >= 1.80x meloloskan koin juara (XRP)
+SUPER_WICK_RESCUE_RATIO = 50.0               # Pintu VIP Super-Wick: Ekor monster >= 50% (MANA, AVAX, SAGA, JUP, ONE)
+SUPER_WICK_MIN_VOL = 0.50                    # Toleransi volume minimum untuk Super-Wick (0.50x)
 MAX_ENTRY_RISK_EMA55_PERCENT = 1.35         # Maksimal jarak harga entry ke support EMA 55 hanya 0.88% (anti resiko tebal, cutloss kecil)
 ANTI_CLIMAX_LOOKBACK_CANDLES = 8            # Pantau 8 candle terakhir (2 jam)
 ANTI_CLIMAX_MAX_RSI = 70.0                  # Dilarang masuk LONG jika dalam 2 jam terakhir baru saja overbought > 70
@@ -174,35 +177,52 @@ MID_RANGE_TRIGGER_PROFIT = 0.55             # Aktif HANYA jika koin sudah pernah
 MID_RANGE_LOCK_PROFIT = 0.08                # Batas aman di BEP tipis (+0.08% cover fee Binance, modal utuh)
 
 # =============================================================================
+# =============================================================================
 # CHOPPY AUTO-BEP & ADAPTIVE REGIME EXIT (PENGAMAN PASAR CHOPPY VS GACOR)
 # =============================================================================
 # Filosofi:
 # 1. Pintu Masuk (Entry): Tetap bebas tanpa dicekik agar tidak ketinggalan kereta.
 # 2. Pasca-Entry (Setelah Masuk):
 #    - Bot mengecek nilai ADX 15m & arah kekuatan (+DI vs -DI) koin.
-#    - Jika ADX < 22 (Pasar Choppy/Sideways) ATAU Arah DI melawan posisi (+DI vs -DI misaligned):
+#    - Jika ADX < 22 (Pasar Choppy/Sideways) ATAU BTC Sideways/Chop:
 #      * Koin berada di Mode Choppy:
-#        a. AUTO-BEP LOCK: Begitu floating profit >= CHOPPY_BEP_TRIGGER_PERCENT (+0.55%),
-#           bot OTOMATIS langsung mengunci Stop Loss ke level BEP (+0.12% cover fee).
-#           Modal terlindungi 100%, anti-loss dari pembalikan arah!
-#        b. CHOPPY PARTIAL TP: Target Partial TP 1 (CP1) diturunkan ke +0.95% agar lekas
-#           mengamankan 50% uang dapur di dompet sebelum koin kehilangan bensin.
+#        a. AUTO-BEP LOCK: Begitu floating profit >= +0.50%, bot OTOMATIS mengunci
+#           Stop Loss ke level BEP Murni (+0.08% cover fee). Memberi ruang napas
+#           longgar tanpa mencekik koin prematur, modal terlindungi 100%!
+#        b. CHOPPY PARTIAL TP: Target Partial TP 1 (CP1) di +0.85% untuk langsung
+#           mengunci 50% muatan kas ke dompet (cuan pasti ~$1.65 - $1.80 USDT).
+#        c. Sisa 50% (Moonbag) dikawal trailing berjarak -0.45% mengejar +1.5% s/d +2.0%+.
 #    - Jika ADX >= 25 dan DI searah (Pasar Gacor / Strong Trend):
-#      * Mode Gacor: Target CP1 normal (+1.45% s/d +1.80%) dengan Trailing Ratchet lega
-#        mengejar Target Puncak Moonbag ($15 s/d $20 USD | +2.70%).
+#      * Mode Gacor: Target CP1 normal (+1.45% s/d +1.80%) dengan Trailing Ratchet lega.
 CHOPPY_AUTO_BEP_ENABLED = True
 CHOPPY_ADX_THRESHOLD = 22.0                  # Batas ADX 15m koin: di bawah 22.0 diklasifikasikan sebagai Choppy/Lemas
-CHOPPY_BEP_TRIGGER_PERCENT = 0.55            # Floating profit minimal +0.55% untuk langsung kunci stop ke BEP
-CHOPPY_BEP_LOCK_PERCENT = 0.12               # Level stop BEP yang dikunci (+0.12% untuk menutup biaya trading fee)
-CHOPPY_CP1_PERCENT = 0.90                    # Target Partial TP 1 koin choppy (+0.90%) agar cepat bungkus profit
+CHOPPY_BEP_TRIGGER_PERCENT = 0.50            # Floating profit minimal +0.50% untuk langsung kunci stop ke BEP
+CHOPPY_BEP_LOCK_PERCENT = 0.08               # Level stop BEP murni (+0.08% untuk menutup biaya trading fee tanpa mencekik)
+CHOPPY_CP1_PERCENT = 0.85                    # Target Partial TP 1 koin choppy (+0.85%) agar lekas bungkus cuan pasti
+CHOPPY_TP1_PERCENT = 0.85                    # Alias TP1 koin choppy (+0.85%)
 
 # =============================================================================
 # TARGET DISIPLIN HARIAN (COMPOUNDING SNOWBALL) & STEPPED RATCHET CHOPPY
 # =============================================================================
 DAILY_TARGET_PROFIT_PERCENT = 10.0            # Target cuan harian dinamis (10% dari modal akun)
-CHOPPY_RATCHET_TRIGGER_PERCENT = 0.42         # Mulai aktif mengawal ketat saat koin choppy naik >= +0.50%
-CHOPPY_RATCHET_TRAIL_PERCENT = 0.30           # Jarak kawal bernapas (0.30% di belakang harga pucuk, mengunci cuan saat choppy)
+CHOPPY_RATCHET_TRIGGER_PERCENT = 0.85         # Stepped ratchet baru mulai trailing ketat SETELAH TP1 (+0.85%)
+CHOPPY_RATCHET_TRAIL_PERCENT = 0.45           # Jarak kawal bernapas sisa moonbag (0.45% di belakang harga pucuk)
 MOONBAG_TARGET_USD = 20.0                    # Target puncak profit satu trade ($20 USD | ~+2.72% harga)
+
+# =============================================================================
+# STAGNATION & TIME-STOP LOSS GUARDS (PENGAMAN KALAH SEMUA REGIME)
+# =============================================================================
+# Lapis 1: Stagnant Early Cut (Koin mandul 20-30 menit yang tak pernah naik dan minus)
+STAGNANT_EARLY_CUT_ENABLED = True             # Potong dini koin lemas mandul
+STAGNANT_EARLY_CUT_MINUTES = 20               # Jika sudah berjalan 20 menit (> 1.3 candle 15m)
+STAGNANT_EARLY_CUT_MAX_HP = 0.20              # Dan tidak pernah naik sama sekali (highest profit < +0.20%)
+STAGNANT_EARLY_CUT_LOSS_THRESHOLD = -0.60     # Dan floating minus <= -0.60% -> Tebas di -$2.30 bukan -$5!
+
+# Lapis 2: Absolute Stagnation Time-Stop (> 50 Menit / > 3 Lilin 15m)
+STAGNANT_TIMESTOP_ENABLED = True              # Tutup posisi jika koin tersandera > 50 menit
+STAGNANT_TIMESTOP_MINUTES = 50                # Jika posisi mengambang > 50 menit
+STAGNANT_TIMESTOP_MAX_LOSS = 0.00             # Dan profit masih di bawah 0.0% (merah/rugi)
+STAGNANT_TIMESTOP_MAX_HP = 0.40               # Dan tak ada daya dorong momentum (highest profit < +0.40%)
 
 # =============================================================================
 # MOONBAG TIMEOUT (PENGAMAN KOIN STAGNAN PASCA-PARTIAL TP)
@@ -273,8 +293,8 @@ BOUNCE_FAILURE_EMA_BUFFER_PERCENT = 0.52     # Toleransi buffer lantai EMA 55 (0
 BOUNCE_FAILURE_MIN_DRAWDOWN_PERCENT = -0.90  # Drawdown minimal terhadap entry untuk konfirmasi dip nyata
 BOUNCE_FAILURE_MIN_REBOUND_PERCENT = 0.35    # Sempat berhasil mantul naik minimal +0.35% harga dari dasar jurang
 BOUNCE_FAILURE_SLIPPAGE_TOLERANCE = 0.25     # Jika setelah mantul harga melorot kembali >= 0.25% dari puncak pantulan -> TEBAS!
-BOUNCE_FAILURE_MAX_LOSS_PERCENT = -1.15      # Batas minus harga maksimal (-1.15% harga | ~ -3.45% ROE di 3x) setelah tembus batas EMA 55
-MAX_LOSS_USDT_CAP = -8.80                    # Batas kerugian dolar nominal maksimal (-$8.80 USDT) setelah tembus batas EMA 55
+BOUNCE_FAILURE_MAX_LOSS_PERCENT = -0.85      # Batas minus harga maksimal keras (-0.85% harga | rugi mentok ~$3.30, anti tembus -$5)
+MAX_LOSS_USDT_CAP = -3.80                    # Batas kerugian dolar nominal maksimal (-$3.80 USDT) mutlak!
 
 # =============================================================================
 # FLEXIBLE MACRO LIQUIDITY GATE (BTC + BTCDOM ADAPTIVE)

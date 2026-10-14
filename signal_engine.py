@@ -34,6 +34,9 @@ class SignalEngine:
         self._cached_dom_time = 0
         self._flash_lock_until = 0
         self._flash_lock_bias = None
+        self._is_btc_chop = False
+        self._cached_btc_1h_range = 0.0
+        self._cached_btc_3h_disp = 0.0
     
     def fetch_candles(self, symbol, timeframe, limit=None):
         """Fetch OHLCV candles dari exchange."""
@@ -130,7 +133,23 @@ class SignalEngine:
             last_1h = df_1h.iloc[-1]
             ema_21 = last_1h.get("ema_21", 0)
             ema_55 = last_1h.get("ema_55", 0)
-            close_1h = last_1h["close"]
+            close_1h = float(last_1h["close"])
+            high_1h = float(last_1h["high"])
+            low_1h = float(last_1h["low"])
+            
+            # Deteksi lilin 1H BTC Sideways / Chop Zone
+            btc_1h_range = ((high_1h - low_1h) / close_1h) * 100 if close_1h > 0 else 0.0
+            last_3_1h = df_1h.iloc[-3:] if len(df_1h) >= 3 else df_1h
+            open_3h = float(last_3_1h["open"].iloc[0])
+            close_3h = float(last_3_1h["close"].iloc[-1])
+            btc_3h_disp = (abs(close_3h - open_3h) / open_3h) * 100 if open_3h > 0 else 0.0
+            
+            chop_1h_max = getattr(config, "BTC_CHOP_1H_RANGE_MAX", 0.80)
+            chop_3h_max = getattr(config, "BTC_CHOP_3H_DISP_MAX", 0.80)
+            is_btc_chop = (btc_1h_range < chop_1h_max and btc_3h_disp < chop_3h_max)
+            self._is_btc_chop = is_btc_chop
+            self._cached_btc_1h_range = btc_1h_range
+            self._cached_btc_3h_disp = btc_3h_disp
             
             # Cek momentum 15m BTC untuk deteksi dump/pump mendadak
             df_15m = self.fetch_candles(btc_symbol, config.TRADING_TIMEFRAME)
@@ -178,6 +197,9 @@ class SignalEngine:
                 bias = self._flash_lock_bias
                 rem_m = (self._flash_lock_until - now) / 60
                 logger.info(f"🛡️ BTC Flash {self._flash_lock_bias.upper()} Lock aktif (Sisa: {rem_m:.1f}m) - Mengunci arah pasar dari whipsaw.")
+            elif is_btc_chop:
+                # BTC terdeteksi bergerak sempit dalam Chop Zone (Sideways)
+                bias = "sideways"
             elif ema_21 > ema_55 and close_1h > ema_55:
                 # Jika 1h bullish tapi 15m mendadak dump (RSI < 40), jangan sebut bullish
                 if rsi_15m < 40:
@@ -197,7 +219,8 @@ class SignalEngine:
             self._cached_btc_15m_pct = btc_15m_pct
             self._cached_btc_15m_drop = btc_15m_drop
             self._cached_btc_15m_surge = btc_15m_surge
-            logger.info(f"🧭 BTC Market Regime: {bias.upper()} (1H Close: {close_1h:.1f}, 15m RSI: {rsi_15m:.1f}, 15m Chg: {btc_15m_pct:+.2f}%)")
+            chop_str = f" [CHOP: 1H Rng {btc_1h_range:.2f}%, 3H Dsp {btc_3h_disp:.2f}%]" if is_btc_chop else ""
+            logger.info(f"🧭 BTC Market Regime: {bias.upper()}{chop_str} (1H Close: {close_1h:.1f}, 15m RSI: {rsi_15m:.1f}, 15m Chg: {btc_15m_pct:+.2f}%)")
             return bias
         except Exception as e:
             logger.warning(f"⚠️ Gagal evaluasi BTC bias: {e}")
@@ -311,10 +334,19 @@ class SignalEngine:
         
         prev_range = prev["high"] - prev["low"]
         prev_lower_wick = (min(prev["open"], prev["close"]) - prev["low"]) / prev_range if prev_range > 0 else 0.0
-        min_wick_ratio = getattr(config, "MIN_ENTRY_REJECTION_WICK_PERCENT", 28.0) / 100.0
-        has_valid_wick = (lower_wick_ratio >= min_wick_ratio and is_green_candle) or (prev_lower_wick >= min_wick_ratio and (is_green_candle or lower_wick_ratio >= 0.15)) or (lower_wick_ratio >= 0.40)
+        # Smart Adaptive Rejection Wick:
+        # Wajib wick tebal minimal >= 18.0% di pasar chop, atau 8.8% di pasar trend
+        is_chop = getattr(self, "_is_btc_chop", False) or (getattr(self, "_cached_btc_bias", "neutral") == "sideways")
+        min_wick_ratio = getattr(config, "CHOP_MIN_REJECTION_WICK_PERCENT" if is_chop else "MIN_ENTRY_REJECTION_WICK_PERCENT", 8.8) / 100.0
+        
+        # Pintu Penyelamat VIP (Additive Rescue Doors):
+        is_whale = vol_ratio >= getattr(config, "WHALE_RESCUE_VOLUME_RATIO", 1.80)
+        is_super_wick = lower_wick_ratio >= (getattr(config, "SUPER_WICK_RESCUE_RATIO", 50.0) / 100.0)
+        has_valid_wick = (lower_wick_ratio >= min_wick_ratio and is_green_candle) or (lower_wick_ratio >= 0.35) or is_whale or is_super_wick
+            
         if not has_valid_wick:
-            return False, 0, {"reason": f"weak_or_unconfirmed_lower_wick_{lower_wick_ratio*100:.1f}%"}
+            regime_label = "CHOP" if is_chop else "TREND"
+            return False, 0, {"reason": f"weak_or_unconfirmed_lower_wick_{lower_wick_ratio*100:.1f}%_{regime_label}"}
             
         if last["close"] < ema_21 * 0.998:
             return False, 0, {"reason": "close_below_ema21"}
@@ -323,17 +355,16 @@ class SignalEngine:
         if rsi < 40 or rsi > 68:
             return False, 0, {"reason": f"rsi_out_of_sweet_spot_{rsi:.1f}"}
             
-        # 8. Volume Validation
+        # 8. Volume Validation (di pasar CHOP wajib >= 1.0x, kecuali Super Wick toleransi >= 0.50x)
         vol_ratio = vol / vol_sma if vol_sma > 0 else 1.0
-        if vol_ratio < config.MIN_VOLUME_RATIO:
-            return False, 0, {"reason": f"volume_too_low_{vol_ratio:.2f}x"}
-            
-        # Directional Smart Money Guard: Anti-Dump Knife (Jangan LONG jika ada guyuran paus)
-        body_ratio = body / candle_range if candle_range > 0 else 0.0
-        if not is_green_candle and body_ratio > 0.50 and vol_ratio >= 1.2:
-            return False, 0, {"reason": f"dump_solid_red_bar_vol_{vol_ratio:.1f}x"}
-        if not is_green_candle and lower_wick_ratio < 0.20 and vol_ratio >= 1.5:
-            return False, 0, {"reason": f"dump_falling_knife_vol_{vol_ratio:.1f}x"}
+        min_vol = getattr(config, "CHOP_MIN_VOLUME_RATIO", 1.0) if getattr(self, "_is_btc_chop", False) else getattr(config, "MIN_VOLUME_RATIO", 0.80)
+        if is_super_wick:
+            min_vol = min(min_vol, getattr(config, "SUPER_WICK_MIN_VOL", 0.50))
+        if vol_ratio < min_vol:
+            return False, 0, {"reason": f"volume_too_low_{vol_ratio:.2f}x_min_{min_vol:.2f}x"}
+        max_vol_ratio = getattr(config, "MAX_PULLBACK_VOLUME_RATIO", 3.20)
+        if max_vol_ratio and vol_ratio > max_vol_ratio:
+            return False, 0, {"reason": f"climax_volume_too_high_{vol_ratio:.2f}x"}
             
         # Scoring kalkulasi
         score = 80
@@ -414,10 +445,19 @@ class SignalEngine:
         
         prev_range = prev["high"] - prev["low"]
         prev_upper_wick = (prev["high"] - max(prev["open"], prev["close"])) / prev_range if prev_range > 0 else 0.0
-        min_wick_ratio = getattr(config, "MIN_ENTRY_REJECTION_WICK_PERCENT", 28.0) / 100.0
-        has_valid_wick = (upper_wick_ratio >= min_wick_ratio and is_red_candle) or (prev_upper_wick >= min_wick_ratio and (is_red_candle or upper_wick_ratio >= 0.15)) or (upper_wick_ratio >= 0.40)
+        # Smart Adaptive Rejection Wick:
+        # Wajib wick tebal minimal >= 18.0% di pasar chop, atau 8.8% di pasar trend
+        is_chop = getattr(self, "_is_btc_chop", False) or (getattr(self, "_cached_btc_bias", "neutral") == "sideways")
+        min_wick_ratio = getattr(config, "CHOP_MIN_REJECTION_WICK_PERCENT" if is_chop else "MIN_ENTRY_REJECTION_WICK_PERCENT", 8.8) / 100.0
+        
+        # Pintu Penyelamat VIP (Additive Rescue Doors):
+        is_whale = vol_ratio >= getattr(config, "WHALE_RESCUE_VOLUME_RATIO", 1.80)
+        is_super_wick = upper_wick_ratio >= (getattr(config, "SUPER_WICK_RESCUE_RATIO", 50.0) / 100.0)
+        has_valid_wick = (upper_wick_ratio >= min_wick_ratio and is_red_candle) or (upper_wick_ratio >= 0.35) or is_whale or is_super_wick
+            
         if not has_valid_wick:
-            return False, 0, {"reason": f"weak_or_unconfirmed_upper_wick_{upper_wick_ratio*100:.1f}%"}
+            regime_label = "CHOP" if is_chop else "TREND"
+            return False, 0, {"reason": f"weak_or_unconfirmed_upper_wick_{upper_wick_ratio*100:.1f}%_{regime_label}"}
             
         if last["close"] > ema_21 * 1.002:
             return False, 0, {"reason": "close_above_ema21"}
@@ -426,17 +466,16 @@ class SignalEngine:
         if rsi < 32 or rsi > 60:
             return False, 0, {"reason": f"rsi_out_of_sweet_spot_{rsi:.1f}"}
             
-        # 8. Volume Validation
+        # 8. Volume Validation (di pasar CHOP wajib >= 1.0x, kecuali Super Wick toleransi >= 0.50x)
         vol_ratio = vol / vol_sma if vol_sma > 0 else 1.0
-        if vol_ratio < config.MIN_VOLUME_RATIO:
-            return False, 0, {"reason": f"volume_too_low_{vol_ratio:.2f}x"}
-            
-        # Directional Smart Money Guard: Anti-Pump Train (Jangan SHORT jika ada pompaan paus)
-        body_ratio = abs(last["close"] - last["open"]) / candle_range if candle_range > 0 else 0.0
-        if not is_red_candle and body_ratio > 0.50 and vol_ratio >= 1.2:
-            return False, 0, {"reason": f"pump_solid_green_bar_vol_{vol_ratio:.1f}x"}
-        if not is_red_candle and upper_wick_ratio < 0.20 and vol_ratio >= 1.2:
-            return False, 0, {"reason": f"pump_green_train_vol_{vol_ratio:.1f}x"}
+        min_vol = getattr(config, "CHOP_MIN_VOLUME_RATIO", 1.0) if getattr(self, "_is_btc_chop", False) else getattr(config, "MIN_VOLUME_RATIO", 0.80)
+        if is_super_wick:
+            min_vol = min(min_vol, getattr(config, "SUPER_WICK_MIN_VOL", 0.50))
+        if vol_ratio < min_vol:
+            return False, 0, {"reason": f"volume_too_low_{vol_ratio:.2f}x_min_{min_vol:.2f}x"}
+        max_vol_ratio = getattr(config, "MAX_PULLBACK_VOLUME_RATIO", 3.20)
+        if max_vol_ratio and vol_ratio > max_vol_ratio:
+            return False, 0, {"reason": f"climax_volume_too_high_{vol_ratio:.2f}x"}
             
         # Scoring kalkulasi
         score = 80
@@ -536,12 +575,22 @@ class SignalEngine:
                         rem_m = (self._flash_lock_until - now) / 60
                         logger.info(f"🚫 SHORT {symbol} diblokir: BTC sedang Flash Pump aktif (Lock {rem_m:.1f}m)!")
                         can_short = False
-                    # 3. Saat BTC 1H Bearish tapi TIDAK sedang Flash Dump (15m tenang):
+                    # 3. Saat BTC 1H Sideways / Chop Zone:
+                    # Altcoin dilarang masuk jika tren 1H-nya juga Neutral (Chop ketemu Chop = Boncos / Jebakan Fakeout)
+                    # Hanya izinkan SHORT jika koin murni BEARISH; Hanya izinkan LONG jika koin murni BULLISH!
+                    elif (btc_bias == "sideways" or getattr(self, "_is_btc_chop", False)):
+                        if can_short and macro_trend != "bearish":
+                            logger.info(f"🚫 SHORT {symbol} diblokir: BTC Sideways/Chop & HTF 1H koin ({macro_trend}) bukan Pure Bearish!")
+                            can_short = False
+                        if can_long and macro_trend != "bullish":
+                            logger.info(f"🚫 LONG {symbol} diblokir: BTC Sideways/Chop & HTF 1H koin ({macro_trend}) bukan Pure Bullish!")
+                            can_long = False
+                    # 4. Saat BTC 1H Bearish tapi TIDAK sedang Flash Dump (15m tenang):
                     # Izinkan LONG HANYA jika koin ini tren 1H-nya murni BULLISH (Koin kuat decoupling seperti PEPE/XRP)
                     elif btc_bias == "bearish" and can_long and macro_trend != "bullish":
                         logger.info(f"🚫 LONG {symbol} diblokir: BTC Bearish & HTF 1H koin ini ({macro_trend}) bukan Bullish murni")
                         can_long = False
-                    # 4. Kebalikannya saat BTC 1H Bullish tapi TIDAK sedang Flash Pump (15m tenang):
+                    # 5. Kebalikannya saat BTC 1H Bullish tapi TIDAK sedang Flash Pump (15m tenang):
                     # Izinkan SHORT HANYA jika koin ini tren 1H-nya murni BEARISH (Koin lemah decoupling)
                     elif btc_bias == "bullish" and can_short and macro_trend != "bearish":
                         logger.info(f"🚫 SHORT {symbol} diblokir: BTC Bullish & HTF 1H koin ini ({macro_trend}) bukan Bearish murni")
@@ -554,6 +603,11 @@ class SignalEngine:
                     elif btc_bias == "bullish" and can_short:
                         logger.info(f"🚫 SHORT {symbol} diblokir oleh BTC Filter: BTC Regime sedang BULLISH")
                         can_short = False
+                    elif btc_bias == "sideways":
+                        if can_short and macro_trend != "bearish":
+                            can_short = False
+                        if can_long and macro_trend != "bullish":
+                            can_long = False
             
             if not can_long and not can_short:
                 reason = "htf_not_trending" if strict_htf and macro_trend == "neutral" else "btc_filter_conflict"
@@ -598,6 +652,19 @@ class SignalEngine:
                             is_long = False
 
                     if is_long:
+                        # Validasi Flexible Macro Liquidity Gate (BTCDOM Adaptif)
+                        dom_chg = self._get_dom_momentum()
+                        is_macro_adverse_long = (dom_chg >= 0.08)  # BTCDOM melonjak, likuiditas lari ke BTC, alts seret
+                        if getattr(config, "FLEXIBLE_MACRO_ENABLED", True) and is_macro_adverse_long:
+                            macro_min_s = getattr(config, "MACRO_ADVERSE_MIN_SCORE", 90)
+                            if score_long < macro_min_s:
+                                logger.info(
+                                    f"🚫 LONG {symbol} ditolak Macro Gate: BTCDOM melonjak (+{dom_chg:.2f}%), "
+                                    f"alts seret likuiditas! (Score: {score_long}/{macro_min_s})"
+                                )
+                                is_long = False
+
+                    if is_long:
                         # Bonus skor jika macro 1H selaras
                         if macro_trend == "bullish":
                             score_long = min(100, score_long + 5)
@@ -610,8 +677,10 @@ class SignalEngine:
                             atr_pullback = current_close - (atr_mult * atr_val)
                             suggested_entry = max(ema_21_val, atr_pullback)
                             # Batas aman: diskon antara 0.15% s/d 1.0% dari harga saat ini
+                            # Jika kondisi makro adverse, wajib diskon lebih dalam (+0.20% -> min diskon 0.35%)
+                            min_disc = 0.9965 if is_macro_adverse_long else 0.9985
                             max_discount_price = current_close * 0.990
-                            min_discount_price = current_close * 0.9985
+                            min_discount_price = current_close * min_disc
                             suggested_entry = max(max_discount_price, min(min_discount_price, suggested_entry))
                             result["suggested_entry_price"] = suggested_entry
                         
@@ -641,6 +710,19 @@ class SignalEngine:
                             is_short = False
 
                     if is_short:
+                        # Validasi Flexible Macro Liquidity Gate (BTCDOM Adaptif)
+                        dom_chg = self._get_dom_momentum()
+                        is_macro_adverse_short = (dom_chg <= -0.06)  # BTCDOM anjlok, alts dipompa likuiditas (rawan short squeeze)
+                        if getattr(config, "FLEXIBLE_MACRO_ENABLED", True) and is_macro_adverse_short:
+                            macro_min_s = getattr(config, "MACRO_ADVERSE_MIN_SCORE", 90)
+                            if score_short < macro_min_s:
+                                logger.info(
+                                    f"🚫 SHORT {symbol} ditolak Macro Gate: BTCDOM anjlok ({dom_chg:.2f}%), "
+                                    f"alts lagi dipompa likuiditas! (Score: {score_short}/{macro_min_s})"
+                                )
+                                is_short = False
+
+                    if is_short:
                         if macro_trend == "bearish":
                             score_short = min(100, score_short + 5)
                         result["signal"] = "SHORT"
@@ -652,8 +734,10 @@ class SignalEngine:
                             atr_pullback = current_close + (atr_mult * atr_val)
                             suggested_entry = min(ema_21_val, atr_pullback)
                             # Batas aman: premi tawar antara 0.15% s/d 1.0% dari harga saat ini
+                            # Jika kondisi makro adverse (alts dipompa), wajib antri di pucuk lebih tinggi (+0.35%)
+                            min_prem = 1.0035 if is_macro_adverse_short else 1.0015
                             max_premium_price = current_close * 1.010
-                            min_premium_price = current_close * 1.0015
+                            min_premium_price = current_close * min_prem
                             suggested_entry = min(max_premium_price, max(min_premium_price, suggested_entry))
                             result["suggested_entry_price"] = suggested_entry
                         
