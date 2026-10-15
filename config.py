@@ -172,7 +172,9 @@ STALL_GUARD_AGED_MIN_EXIT_PROFIT = 0.60
 #   Koin terbukti punya momentum, tapi belum sampai ke radar BEP statis (+0.80%).
 # - Jika dari puncak tersebut koin melorot kembali ke pintu modal (profit <= +0.10% / BEP cover fee):
 #   Bot mengamankan posisi agar modal selamat dan tidak berbalik menjadi kerugian tekor!
-MID_RANGE_GUARD_ENABLED = True
+# CATATAN AUDIT 312 TRADES: Dinonaktifkan (False) karena kanibal terhadap koin runner (2Z, RENDER, DOT, W, APR)
+# yang sedang pullback normal sebelum meledak ke TP1 (+0.85%). Sistem sudah dilindungi TP1 & Binance BEP!
+MID_RANGE_GUARD_ENABLED = False
 MID_RANGE_TRIGGER_PROFIT = 0.55             # Aktif HANYA jika koin sudah pernah naik minimal +0.55% (cuan ~$3.8+)
 MID_RANGE_LOCK_PROFIT = 0.08                # Batas aman di BEP tipis (+0.08% cover fee Binance, modal utuh)
 
@@ -218,11 +220,13 @@ STAGNANT_EARLY_CUT_MINUTES = 20               # Jika sudah berjalan 20 menit (> 
 STAGNANT_EARLY_CUT_MAX_HP = 0.20              # Dan tidak pernah naik sama sekali (highest profit < +0.20%)
 STAGNANT_EARLY_CUT_LOSS_THRESHOLD = -0.60     # Dan floating minus <= -0.60% -> Tebas di -$2.30 bukan -$5!
 
-# Lapis 2: Absolute Stagnation Time-Stop (> 50 Menit / > 3 Lilin 15m)
-STAGNANT_TIMESTOP_ENABLED = True              # Tutup posisi jika koin tersandera > 50 menit
-STAGNANT_TIMESTOP_MINUTES = 50                # Jika posisi mengambang > 50 menit
-STAGNANT_TIMESTOP_MAX_LOSS = 0.00             # Dan profit masih di bawah 0.0% (merah/rugi)
-STAGNANT_TIMESTOP_MAX_HP = 0.40               # Dan tak ada daya dorong momentum (highest profit < +0.40%)
+# Lapis 2: Absolute Stagnation Time-Stop (> 80 Menit / > 5 Lilin 15m)
+# CATATAN AUDIT 312 TRADES: 39 trade cuan butuh 50-90m (+120 USDT). Dilonggarkan ke 80m
+# dan hanya tebas jika profit <= -0.65% (koin konsolidasi minus tipis -0.10% spt XLM/TAO aman!).
+STAGNANT_TIMESTOP_ENABLED = True              # Tutup posisi jika koin tersandera > 80 menit
+STAGNANT_TIMESTOP_MINUTES = 80                # Jika posisi mengambang > 80 menit (> 5 lilin 15m)
+STAGNANT_TIMESTOP_MAX_LOSS = -0.65            # Hanya jika minus lebih dalam dari -0.65% (bukan 0.0%)
+STAGNANT_TIMESTOP_MAX_HP = 0.35               # Dan tak ada daya dorong momentum (highest profit < +0.35%)
 
 # =============================================================================
 # MOONBAG TIMEOUT (PENGAMAN KOIN STAGNAN PASCA-PARTIAL TP)
@@ -313,7 +317,9 @@ MACRO_ADVERSE_EXTRA_OFFSET = 0.20                # Tambahan diskon limit order (
 #   Bot mengecek volume lilin 1 menit terakhir.
 # - Jika Volume >= 2.5x rata-rata 1m (Smart Money air terjun nyata) -> TEBAS INSTAN tanpa nunggu 15m!
 # - Jika Volume kecil/biasa (< 2.5x) -> TAHAN! Ini gojekan jarum likuidasi, beri ruang mantul!
-PANIC_VOLUME_CUT_ENABLED = True
+# CATATAN AUDIT 312 TRADES: Dinonaktifkan (False) karena jarum likuidasi 1m sering memotong koin prematur (seperti SUI).
+# Pengaman batas bawah sepenuhnya dipegang oleh Hard Loss Cap (-1.05% / mentok -$3.90).
+PANIC_VOLUME_CUT_ENABLED = False
 PANIC_VOLUME_CUT_MIN_DRAWDOWN = -0.75        # Hanya aktif jika drawdown sudah menyentuh -0.75% harga
 PANIC_VOLUME_CUT_RATIO = 3.8                 # Volume ledakan 1m >= 2.5x rata-rata SMA 10 lilin 1m
 

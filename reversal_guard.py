@@ -159,7 +159,7 @@ class ReversalGuard:
                         if elapsed_minutes >= timestop_min and profit_pct_val < timestop_max_loss and highest_p_val < timestop_max_hp:
                             logger.warning(
                                 f"⏰ STAGNATION TIME-STOP TRIGGERED for {symbol}! "
-                                f"Durasi: {elapsed_minutes:.1f}m >= {timestop_min}m (> 3 lilin 15m) | "
+                                f"Durasi: {elapsed_minutes:.1f}m >= {timestop_min}m (> {timestop_min/15:.1f} lilin 15m) | "
                                 f"Profit: {profit_pct_val:.2f}% | Highest: +{highest_p_val:.2f}%. "
                                 f"Koin tersandera di zona merah tanpa momentum. Bebaskan margin untuk koin baru!"
                             )
@@ -168,11 +168,11 @@ class ReversalGuard:
                                 symbol=symbol,
                                 side=side,
                                 amount=pos["amount"],
-                                reason=f"stagnant_timestop_50m ({profit_pct_val:.2f}%)"
+                                reason=f"stagnant_timestop_{timestop_min}m ({profit_pct_val:.2f}%)"
                             )
                             if close_res:
                                 result["action"] = "closed"
-                                result["reason"] = "stagnant_timestop_50m"
+                                result["reason"] = f"stagnant_timestop_{timestop_min}m"
                                 result["details"] = {"profit_pct": profit_pct_val, "elapsed_minutes": elapsed_minutes}
                                 return result
             except Exception as e_stag:
