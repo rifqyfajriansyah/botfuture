@@ -620,16 +620,17 @@ class TradingBot:
             self.state.set_status("cooldown")
             return
             
-        # 2. Cek Saldo Minimum
+        # 2. Cek Saldo Minimum (Capital Floor Guard - Batas Pengaman Modal Rp 5.000.000)
         balance = self.order_mgr.get_available_balance()
         if balance < config.MIN_WALLET_BALANCE_USDT:
             if now - self._last_cooldown_log >= 60:
                 logger.warning(
-                    f"⚠️ Saldo {balance:.2f} USDT dibawah batas minimum {config.MIN_WALLET_BALANCE_USDT} USDT. "
-                    f"Menunggu isi saldo."
+                    f"🛑 CAPITAL FLOOR GUARD TRIGGERED! Saldo dompet ({balance:.2f} USDT) berada di bawah "
+                    f"batas minimum lantai modal pokok {config.MIN_WALLET_BALANCE_USDT} USDT (~Rp 5.000.000). "
+                    f"Bot otomatis mengunci diri dan berhenti trading demi menjaga modal pokok Anda 100% utuh!"
                 )
                 self._last_cooldown_log = now
-            self.state.set_status("insufficient_balance")
+            self.state.set_status("capital_floor_stop")
             return
             
         self.state.set_status("scanning")

@@ -169,7 +169,10 @@ class OrderManager:
             # Hitung jumlah kontrak
             balance = self.get_available_balance()
             if balance <= config.MIN_WALLET_BALANCE_USDT:
-                logger.error(f"❌ Balance {balance:.2f} USDT dibawah batas aman {config.MIN_WALLET_BALANCE_USDT} USDT.")
+                logger.error(
+                    f"🛑 Order ditolak Capital Floor Guard: Balance {balance:.2f} USDT <= batas lantai modal "
+                    f"{config.MIN_WALLET_BALANCE_USDT} USDT (~Rp 5.000.000). Modal pokok aman!"
+                )
                 return None
             
             usable_balance = balance * config.BALANCE_USAGE

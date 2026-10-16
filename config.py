@@ -23,7 +23,12 @@ LEVERAGE = 3                    # Leverage 3x (Aman & terkontrol)
 MARGIN_MODE = "isolated"        # Isolated margin (lebih aman per posisi)
 BALANCE_USAGE = 0.90            # Gunakan 90% balance (maksimalisasi profit dengan entry terfilter ketat)
 MAX_POSITIONS = 1               # Hanya 1 posisi aktif
-MIN_WALLET_BALANCE_USDT = 5.0   # Saldo minimum untuk bot mulai trading
+# =============================================================================
+# CAPITAL FLOOR GUARD (PENGAMAN MODAL POKOK 5 JUTA RUPIAH)
+# =============================================================================
+# Jika sewaktu-waktu saldo dompet turun ke batas ini (~Rp 5.000.000),
+# bot OTOMATIS BERHENTI membuka posisi baru untuk mengunci modal pokok 100% aman!
+MIN_WALLET_BALANCE_USDT = 280.0   # $280 USDT setara Rp 5.000.000 IDR (Kurs ~Rp 17.850 / USDT)
 
 # =============================================================================
 # COOLDOWN & ANTI-REENTRY SETTINGS
