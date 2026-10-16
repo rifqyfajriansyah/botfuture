@@ -390,3 +390,25 @@ class StateManager:
                 daily_pnl += float(trade.get("pnl", 0.0))
         return round(daily_pnl, 2)
 
+    def get_or_init_daily_target_usd(self, current_equity=None):
+        """Ambil atau inisialisasi target profit harian (10% dari modal akun hari ini)."""
+        now = datetime.now()
+        today_str = now.strftime("%Y-%m-%d")
+        baseline = self.state.get("daily_target_baseline")
+        
+        target_pct = getattr(config, "DAILY_TARGET_PROFIT_PERCENT", 10.0)
+        
+        if not baseline or baseline.get("date") != today_str:
+            starting_equity = float(current_equity) if current_equity and current_equity > 0 else 150.0
+            target_usd = round(starting_equity * (target_pct / 100.0), 2)
+            self.state["daily_target_baseline"] = {
+                "date": today_str,
+                "starting_balance": starting_equity,
+                "target_usd": target_usd
+            }
+            self.save()
+            return target_usd
+            
+        return float(baseline.get("target_usd", 15.0))
+
+

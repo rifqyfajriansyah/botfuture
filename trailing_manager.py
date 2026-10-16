@@ -394,9 +394,12 @@ class TrailingManager:
 
                 # 2. STEPPED RATCHET CHOPPY (Mulai trailing ketat SETELAH TP1 di +0.85% diambil)
                 daily_pnl = self.state.get_daily_pnl()
-                daily_target_usd = self.state.get_or_init_daily_target_usd(
-                    current_equity=self.order_mgr.get_total_equity()
-                )
+                equity_fn = getattr(self.order_mgr, "get_total_equity", None) or getattr(self.order_mgr, "get_available_balance", None)
+                cur_eq = equity_fn() if equity_fn else None
+                if hasattr(self.state, "get_or_init_daily_target_usd"):
+                    daily_target_usd = self.state.get_or_init_daily_target_usd(current_equity=cur_eq)
+                else:
+                    daily_target_usd = round((cur_eq or 150.0) * (getattr(config, "DAILY_TARGET_PROFIT_PERCENT", 10.0) / 100.0), 2)
                 
                 # Mode kawal ketat aktif HANYA jika target harian belum tercapai
                 if daily_pnl < daily_target_usd:
@@ -407,6 +410,15 @@ class TrailingManager:
                     if highest_p >= ratchet_trigger:
                         # Kunci level stop di (highest_p - ratchet_trail), minimal cover fee di +0.12%
                         desired_lock_pct = round(max(0.12, highest_p - ratchet_trail), 2)
+                        
+                        # 🛡️ PROFIT FLOOR RATCHET (ANTI CUAN MELOROT KE BEP):
+                        # Jika peak sudah >= +1.50% (cuan ~$8), kunci stop minimal di +0.65% (pasti cuan ~$3.5+)
+                        if highest_p >= 1.50:
+                            desired_lock_pct = max(desired_lock_pct, 0.65)
+                        # Jika peak sudah >= +1.80% (cuan ~$10+), kunci stop minimal di +1.00% (pasti cuan ~$5.5+, HARAM BEP!)
+                        if highest_p >= 1.80:
+                            desired_lock_pct = max(desired_lock_pct, 1.00)
+                            
                         current_locked_pct = float(pos.get("choppy_ratchet_locked_pct", 0.0))
                         
                         # Kerek stop order naik jika level baru lebih tinggi minimal 0.04%
@@ -440,28 +452,13 @@ class TrailingManager:
                                     )
                             else:
                                 # Jika harga pasar saat ini sudah terlanjur di bawah ratchet stop,
-                                # tandai level agar tidak looping spam & pulihkan Emergency SL jika belum aktif
+                                # tandai level agar tidak looping spam, pertahankan stop aman yang aktif
                                 pos["choppy_ratchet_locked_pct"] = desired_lock_pct
                                 self.state.save()
                                 logger.warning(
                                     f"⚠️ Ratchet stop @ {ratchet_stop_price:.4f} (+{desired_lock_pct}%) sudah terlewati "
-                                    f"oleh harga pasar {current_price:.4f} ({symbol}). Menjaga posisi aman dengan Emergency SL."
+                                    f"oleh harga pasar {current_price:.4f} ({symbol}). Mempertahankan stop aman yang aktif."
                                 )
-                                sl_pct = getattr(config, "EMERGENCY_SL_PERCENT", 18.0)
-                                sl_price = entry_price * (1 - sl_pct / 100.0) if side == "long" else entry_price * (1 + sl_pct / 100.0)
-                                em_stop = self.order_mgr.place_stop_order(
-                                    symbol=symbol,
-                                    side=side,
-                                    amount=pos.get("amount", amount),
-                                    stop_price=sl_price
-                                )
-                                if em_stop:
-                                    self.state.set_trailing_stop(
-                                        stop_order_id=em_stop["id"],
-                                        stop_price=sl_price,
-                                        checkpoint_level=0
-                                    )
-                                    logger.info(f"✅ Emergency SL dipulihkan di {sl_price:.4f} ID: {em_stop['id']}")
 
         if getattr(config, "PARTIAL_TP_ENABLED", True) and not pos.get("partial_tp_done", False):
             # Target TP Dinamis Adaptif ATR koin
@@ -616,6 +613,8 @@ class TrailingManager:
                             bep_pct = dyn_params["first_stop"]
                         else:
                             bep_pct = 0.22  # BEP murni cover fee
+                        # JANGAN PERNAH DOWNGRADE: Jika ratchet sudah mengunci level lebih tinggi, pertahankan level tertinggi!
+                        bep_pct = max(bep_pct, float(pos.get("choppy_ratchet_locked_pct", 0.0)))
                         bep_stop_price = self.calculate_stop_price(entry_price, bep_pct, side)
                         
                         if old_stop and old_stop.get("order_id"):

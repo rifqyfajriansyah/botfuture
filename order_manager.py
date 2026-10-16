@@ -72,6 +72,21 @@ class OrderManager:
             logger.error(f"❌ Gagal fetch balance: {e}")
             return 0
     
+    def get_total_equity(self):
+        """Ambil total equity akun USDT-M Futures (wallet balance + unrealized PnL)."""
+        try:
+            balance = self.exchange.fetch_balance()
+            usdt = balance.get("USDT", {})
+            total = usdt.get("total")
+            if total is not None and float(total) > 0:
+                return float(total)
+            free = usdt.get("free", 0)
+            return float(free)
+        except Exception as e:
+            logger.error(f"❌ Gagal fetch total equity: {e}")
+            return self.get_available_balance()
+
+    
     # =========================================================================
     # Entry Order (Limit)
     # =========================================================================

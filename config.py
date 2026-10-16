@@ -257,6 +257,7 @@ TIME_PROGRESSIVE_LOCK_ENABLED = True
 TIME_PROGRESSIVE_MINUTES = 75              # 75 Menit (5 lilin 15m): batas waktu koin matang / loyo
 TIME_PROGRESSIVE_STAGNANT_MAX_PROFIT = 1.2  # Koin yang stagnan/loyo di bawah +1.2%
 TIME_PROGRESSIVE_MIN_BREATHING_ROOM_PERCENT = 1.0 # Buffer napas minimal 1.0% dari harga live
+TIME_PROGRESSIVE_BEP_STOP = 0.18               # Stop BEP murni (+0.18% cover fee exchange)
 
 # =============================================================================
 # BTCDOM-ADAPTIVE BEP & PROFIT LOCK (PENGAMAN ANGIN SAKAL LIKUIDITAS)
