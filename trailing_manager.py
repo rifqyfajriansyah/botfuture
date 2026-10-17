@@ -392,7 +392,7 @@ class TrailingManager:
                                     f"Physical Stop Locked @ {bep_stop_price} (+{bep_lock}% cover fee). MODAL 100% AMAN BEBAS RESIKO!"
                                 )
 
-                # 2. STEPPED RATCHET CHOPPY (Mulai trailing ketat SETELAH TP1 di +0.85% diambil)
+                # 2. STEPPED RATCHET CHOPPY (Kawal ketat profit di pasar choppy mulai +0.70%)
                 daily_pnl = self.state.get_daily_pnl()
                 equity_fn = getattr(self.order_mgr, "get_total_equity", None) or getattr(self.order_mgr, "get_available_balance", None)
                 cur_eq = equity_fn() if equity_fn else None
@@ -401,64 +401,63 @@ class TrailingManager:
                 else:
                     daily_target_usd = round((cur_eq or 150.0) * (getattr(config, "DAILY_TARGET_PROFIT_PERCENT", 10.0) / 100.0), 2)
                 
-                # Mode kawal ketat aktif HANYA jika target harian belum tercapai
-                if daily_pnl < daily_target_usd:
-                    ratchet_trigger = getattr(config, "CHOPPY_RATCHET_TRIGGER_PERCENT", 0.85)
-                    ratchet_trail = getattr(config, "CHOPPY_RATCHET_TRAIL_PERCENT", 0.45)
-                    highest_p = max(pos.get("highest_profit_pct", 0.0), profit_pct)
+                # Mode stepped ratchet selalu aktif di pasar choppy untuk mengamankan cuan
+                ratchet_trigger = getattr(config, "CHOPPY_RATCHET_TRIGGER_PERCENT", 0.70)
+                ratchet_trail = getattr(config, "CHOPPY_RATCHET_TRAIL_PERCENT", 0.45)
+                highest_p = max(pos.get("highest_profit_pct", 0.0), profit_pct)
+                
+                if highest_p >= ratchet_trigger:
+                    # Kunci level stop di (highest_p - ratchet_trail), minimal cover fee di +0.12%
+                    desired_lock_pct = round(max(0.12, highest_p - ratchet_trail), 2)
                     
-                    if highest_p >= ratchet_trigger:
-                        # Kunci level stop di (highest_p - ratchet_trail), minimal cover fee di +0.12%
-                        desired_lock_pct = round(max(0.12, highest_p - ratchet_trail), 2)
+                    # 🛡️ PROFIT FLOOR RATCHET (ANTI CUAN MELOROT KE BEP):
+                    # Jika peak sudah >= +1.50% (cuan ~$8), kunci stop minimal di +0.65% (pasti cuan ~$3.5+)
+                    if highest_p >= 1.50:
+                        desired_lock_pct = max(desired_lock_pct, 0.65)
+                    # Jika peak sudah >= +1.80% (cuan ~$10+), kunci stop minimal di +1.00% (pasti cuan ~$5.5+, HARAM BEP!)
+                    if highest_p >= 1.80:
+                        desired_lock_pct = max(desired_lock_pct, 1.00)
                         
-                        # 🛡️ PROFIT FLOOR RATCHET (ANTI CUAN MELOROT KE BEP):
-                        # Jika peak sudah >= +1.50% (cuan ~$8), kunci stop minimal di +0.65% (pasti cuan ~$3.5+)
-                        if highest_p >= 1.50:
-                            desired_lock_pct = max(desired_lock_pct, 0.65)
-                        # Jika peak sudah >= +1.80% (cuan ~$10+), kunci stop minimal di +1.00% (pasti cuan ~$5.5+, HARAM BEP!)
-                        if highest_p >= 1.80:
-                            desired_lock_pct = max(desired_lock_pct, 1.00)
-                            
-                        current_locked_pct = float(pos.get("choppy_ratchet_locked_pct", 0.0))
+                    current_locked_pct = float(pos.get("choppy_ratchet_locked_pct", 0.0))
+                    
+                    # Kerek stop order naik jika level baru lebih tinggi minimal 0.04%
+                    if desired_lock_pct > current_locked_pct + 0.04:
+                        ratchet_stop_price = self.calculate_stop_price(entry_price, desired_lock_pct, side)
+                        is_stop_valid = (current_price > ratchet_stop_price) if side == "long" else (current_price < ratchet_stop_price)
                         
-                        # Kerek stop order naik jika level baru lebih tinggi minimal 0.04%
-                        if desired_lock_pct > current_locked_pct + 0.04:
-                            ratchet_stop_price = self.calculate_stop_price(entry_price, desired_lock_pct, side)
-                            is_stop_valid = (current_price > ratchet_stop_price) if side == "long" else (current_price < ratchet_stop_price)
-                            
-                            if is_stop_valid:
-                                if old_stop and old_stop.get("order_id"):
-                                    self.order_mgr.cancel_stop_order(symbol, old_stop["order_id"])
-                                    
-                                new_stop = self.order_mgr.place_stop_order(
-                                    symbol=symbol,
-                                    side=side,
-                                    amount=pos.get("amount", amount),
-                                    stop_price=ratchet_stop_price
+                        if is_stop_valid:
+                            if old_stop and old_stop.get("order_id"):
+                                self.order_mgr.cancel_stop_order(symbol, old_stop["order_id"])
+                                
+                            new_stop = self.order_mgr.place_stop_order(
+                                symbol=symbol,
+                                side=side,
+                                amount=pos.get("amount", amount),
+                                stop_price=ratchet_stop_price
+                            )
+                            if new_stop:
+                                self.state.set_trailing_stop(
+                                    stop_order_id=new_stop["id"],
+                                    stop_price=ratchet_stop_price,
+                                    checkpoint_level=desired_lock_pct
                                 )
-                                if new_stop:
-                                    self.state.set_trailing_stop(
-                                        stop_order_id=new_stop["id"],
-                                        stop_price=ratchet_stop_price,
-                                        checkpoint_level=desired_lock_pct
-                                    )
-                                    pos["choppy_ratchet_locked_pct"] = desired_lock_pct
-                                    pos["choppy_bep_locked"] = True
-                                    self.state.save()
-                                    logger.info(
-                                        f"🪜 CHOPPY STEPPED RATCHET LOCKED for {symbol}! "
-                                        f"Peak: +{highest_p:.2f}% (trailed -{ratchet_trail:.2f}%) ➔ Stop Locked @ {ratchet_stop_price} (+{desired_lock_pct}%). "
-                                        f"Target Harian: ${daily_pnl:.2f}/${daily_target_usd:.2f} USDT!"
-                                    )
-                            else:
-                                # Jika harga pasar saat ini sudah terlanjur di bawah ratchet stop,
-                                # tandai level agar tidak looping spam, pertahankan stop aman yang aktif
                                 pos["choppy_ratchet_locked_pct"] = desired_lock_pct
+                                pos["choppy_bep_locked"] = True
                                 self.state.save()
-                                logger.warning(
-                                    f"⚠️ Ratchet stop @ {ratchet_stop_price:.4f} (+{desired_lock_pct}%) sudah terlewati "
-                                    f"oleh harga pasar {current_price:.4f} ({symbol}). Mempertahankan stop aman yang aktif."
+                                logger.info(
+                                    f"🪜 CHOPPY STEPPED RATCHET LOCKED for {symbol}! "
+                                    f"Peak: +{highest_p:.2f}% (trailed -{ratchet_trail:.2f}%) ➔ Stop Locked @ {ratchet_stop_price} (+{desired_lock_pct}%). "
+                                    f"Daily PnL: ${daily_pnl:.2f}/${daily_target_usd:.2f} USDT!"
                                 )
+                        else:
+                            # Jika harga pasar saat ini sudah terlanjur di bawah ratchet stop,
+                            # tandai level agar tidak looping spam, pertahankan stop aman yang aktif
+                            pos["choppy_ratchet_locked_pct"] = desired_lock_pct
+                            self.state.save()
+                            logger.warning(
+                                f"⚠️ Ratchet stop @ {ratchet_stop_price:.4f} (+{desired_lock_pct}%) sudah terlewati "
+                                f"oleh harga pasar {current_price:.4f} ({symbol}). Mempertahankan stop aman yang aktif."
+                            )
 
         if getattr(config, "PARTIAL_TP_ENABLED", True) and not pos.get("partial_tp_done", False):
             # Target TP Dinamis Adaptif ATR koin

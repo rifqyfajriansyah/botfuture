@@ -212,7 +212,7 @@ CHOPPY_TP1_PERCENT = 0.85                    # Alias TP1 koin choppy (+0.85%)
 # TARGET DISIPLIN HARIAN (COMPOUNDING SNOWBALL) & STEPPED RATCHET CHOPPY
 # =============================================================================
 DAILY_TARGET_PROFIT_PERCENT = 10.0            # Target cuan harian dinamis (10% dari modal akun)
-CHOPPY_RATCHET_TRIGGER_PERCENT = 0.85         # Stepped ratchet baru mulai trailing ketat SETELAH TP1 (+0.85%)
+CHOPPY_RATCHET_TRIGGER_PERCENT = 0.70         # Stepped ratchet mulai trailing ketat di pasar choppy mulai +0.70%
 CHOPPY_RATCHET_TRAIL_PERCENT = 0.45           # Jarak kawal bernapas sisa moonbag (0.45% di belakang harga pucuk)
 MOONBAG_TARGET_USD = 20.0                    # Target puncak profit satu trade ($20 USD | ~+2.72% harga)
 
