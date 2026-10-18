@@ -585,6 +585,18 @@ class SignalEngine:
                         if can_long and macro_trend != "bullish":
                             logger.info(f"🚫 LONG {symbol} diblokir: BTC Sideways/Chop & HTF 1H koin ({macro_trend}) bukan Pure Bullish!")
                             can_long = False
+                        
+                        # ADAPTIVE CHOP GATE (Audit 271 Trade Historis: Net Gain +78.03 USDT)
+                        # Di pasar Sideways, pasar bersifat Mean-Reverting di dalam kotak support & resistance:
+                        chop_max_long_rsi = getattr(config, "BTC_CHOP_MAX_LONG_RSI", 60.0)
+                        if can_long and btc_rsi_15m >= chop_max_long_rsi:
+                            logger.info(f"🚫 LONG {symbol} diblokir [Adaptive Chop Gate]: BTC Sideways & RSI 15m ({btc_rsi_15m:.1f} >= {chop_max_long_rsi:.1f}) di atap resisten kotak chop!")
+                            can_long = False
+                        
+                        chop_min_short_rsi = getattr(config, "BTC_CHOP_MIN_SHORT_RSI", 58.0)
+                        if can_short and btc_rsi_15m >= chop_min_short_rsi:
+                            logger.info(f"🚫 SHORT {symbol} diblokir [Adaptive Chop Gate]: BTC Sideways & RSI 15m ({btc_rsi_15m:.1f} >= {chop_min_short_rsi:.1f}) sedang memantul naik!")
+                            can_short = False
                     # 4. Saat BTC 1H Bearish tapi TIDAK sedang Flash Dump (15m tenang):
                     # Izinkan LONG HANYA jika koin ini tren 1H-nya murni BULLISH (Koin kuat decoupling seperti PEPE/XRP)
                     elif btc_bias == "bearish" and can_long and macro_trend != "bullish":
@@ -608,6 +620,12 @@ class SignalEngine:
                             can_short = False
                         if can_long and macro_trend != "bullish":
                             can_long = False
+                        chop_max_long_rsi = getattr(config, "BTC_CHOP_MAX_LONG_RSI", 60.0)
+                        if can_long and btc_rsi_15m >= chop_max_long_rsi:
+                            can_long = False
+                        chop_min_short_rsi = getattr(config, "BTC_CHOP_MIN_SHORT_RSI", 58.0)
+                        if can_short and btc_rsi_15m >= chop_min_short_rsi:
+                            can_short = False
             
             if not can_long and not can_short:
                 reason = "htf_not_trending" if strict_htf and macro_trend == "neutral" else "btc_filter_conflict"

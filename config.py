@@ -75,10 +75,10 @@ CHOP_MIN_VOLUME_RATIO = 1.00               # Saat BTC Sideways/Chop, altcoin WAJ
 # ENTRY 2.0 (BTC MICRO-REBOUND & MICRO-SLIP GUARD - ZONA EMAS BACKTEST 0.14%)
 BTC_REBOUND_MAX_15M_PCT = 0.14              # Dilarang SHORT jika lilin 15m BTC sedang memantul naik >= +0.14% (anti keseret pantulan)
 BTC_SLIP_MAX_15M_PCT = 0.14                 # Dilarang LONG jika lilin 15m BTC sedang longsor turun <= -0.14% (anti pisau jatuh)
-BTC_CHOP_RSI_OVERSOLD = 42.0                # Jangan buka SHORT jika RSI 15m BTC < 42 (zona bawah rawan rebound dead-cat bounce)
+BTC_CHOP_MAX_LONG_RSI = 60.0               # [Adaptive Chop Gate] Di pasar Sideways, dilarang LONG jika BTC 15m RSI >= 60.0 (atap resisten kotak)
+BTC_CHOP_MIN_SHORT_RSI = 58.0              # [Adaptive Chop Gate] Di pasar Sideways, dilarang SHORT jika BTC 15m RSI >= 58.0 (BTC sedang memantul naik)
 BTC_MIN_SHORT_RSI = 32.0                    # Dilarang buka SHORT jika RSI 15m BTC < 32 (jenuh jual di dasar support rawan memantul)
 BTC_CHOP_RSI_CRASH_FLOOR = 40.0             # DILARANG KERAS BUKA LONG jika RSI 15m BTC < 40 (pasar dingin/sedang dump parah)
-BTC_CHOP_RSI_OVERBOUGHT = 65.0              # Jangan buka LONG jika RSI 15m BTC > 65 (pucuk jenuh, rawan profit-taking)
 ANOMALY_MIN_SCORE = 90                      # Skor sinyal wajib >= 90 (Grade S) untuk boleh decoupling lawan arus BTC
 ANOMALY_MIN_VOL_RATIO = 1.60                # Volume wajib >= 1.60x SMA 20 (Smart Money nyata) untuk boleh lawan arus BTC
 ENTRY_MIN_VOLUME_RATIO = 0.80               # Volume standar minimal lilin entry >= 1.20x SMA 20 (hanya candle bervolume kuat)

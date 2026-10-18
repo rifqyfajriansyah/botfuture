@@ -549,6 +549,14 @@ class TradingBot:
                     return True, "BTC mendadak Bullish / Flash Pump saat antri Short"
                 elif side == "long" and (bias == "bearish" or (is_flash and flash_bias == "bearish")):
                     return True, "BTC mendadak Bearish / Flash Crash saat antri Long"
+                elif bias == "sideways":
+                    btc_rsi_15m = self.signal_engine._get_btc_rsi_15m()
+                    chop_max_long_rsi = getattr(config, "BTC_CHOP_MAX_LONG_RSI", 60.0)
+                    chop_min_short_rsi = getattr(config, "BTC_CHOP_MIN_SHORT_RSI", 58.0)
+                    if side == "long" and btc_rsi_15m >= chop_max_long_rsi:
+                        return True, f"BTC Sideways & RSI 15m ({btc_rsi_15m:.1f} >= {chop_max_long_rsi:.1f}) di atap resisten kotak saat antri Long"
+                    elif side == "short" and btc_rsi_15m >= chop_min_short_rsi:
+                        return True, f"BTC Sideways & RSI 15m ({btc_rsi_15m:.1f} >= {chop_min_short_rsi:.1f}) sedang memantul naik saat antri Short"
                     
             return False, None
         except Exception as e:
