@@ -114,7 +114,7 @@ class TradingBot:
         self.scanner = MarketScanner(self.exchange)
         self.signal_engine = SignalEngine(self.exchange)
         self.order_mgr = OrderManager(self.exchange, self.state)
-        self.trailing_mgr = TrailingManager(self.order_mgr, self.state)
+        self.trailing_mgr = TrailingManager(self.order_mgr, self.state, self.signal_engine)
         self.reversal_guard = ReversalGuard(
             self.signal_engine, self.order_mgr,
             self.trailing_mgr, self.state
@@ -337,7 +337,7 @@ class TradingBot:
                 )
             return
             
-        if trail_result["action"] == "closed":
+        if trail_result["action"] in ["closed", "stall_guard_full_close"]:
             logger.info(
                 f"🔴 Position already CLOSED by Trailing Manager ({trail_result.get('reason')})."
             )
@@ -474,6 +474,61 @@ class TradingBot:
                 )
                 if config.EMERGENCY_SL_ENABLED:
                     self._place_emergency_sl(pos)
+            else:
+                # ZERO FILL CASE: Order tawar sama sekali belum kejemput (0% filled)
+                # Cek Zero-Fill Momentum Chase (Anti-Ketinggalan Kereta Koin Juara)
+                if getattr(config, "ZERO_FILL_CHASE_ENABLED", True) and orig_amount > 0:
+                    current_price = self.order_mgr.get_current_price(symbol)
+                    order_price = float(order.get("price", 0.0))
+                    side = order.get("side", "long").lower()
+                    if current_price > 0 and order_price > 0:
+                        # Hitung apakah harga bergerak ke arah sinyal yang menguntungkan
+                        if side == "long":
+                            price_gain = (current_price - order_price) / order_price * 100.0
+                        else:
+                            price_gain = (order_price - current_price) / order_price * 100.0
+                        
+                        min_gain = getattr(config, "ZERO_FILL_CHASE_MIN_GAIN_PERCENT", 0.08)
+                        max_slip = getattr(config, "ZERO_FILL_CHASE_MAX_SLIPPAGE_PERCENT", 0.35)
+                        
+                        # Jika koin mulai lari ke arah profit (+0.08% s/d +0.35%), jangan bengong ditinggal!
+                        if min_gain <= price_gain <= max_slip:
+                            logger.info(
+                                f"🚀 ZERO-FILL MOMENTUM CHASE: {symbol} mulai bergerak (+{price_gain:.2f}% dari tawar {order_price})! "
+                                f"Menyapu via MARKET order ({orig_amount} kontrak @ {current_price}) agar koin juara tidak lolos..."
+                            )
+                            market_side = "buy" if side == "long" else "sell"
+                            try:
+                                formatted_amt = float(self.order_mgr.exchange.amount_to_precision(symbol, orig_amount))
+                                market_order = self.order_mgr.exchange.create_order(
+                                    symbol=symbol,
+                                    type="market",
+                                    side=market_side,
+                                    amount=formatted_amt,
+                                    params={"reduceOnly": False}
+                                )
+                                if market_order:
+                                    fill_p = float(market_order.get("average") or market_order.get("price") or current_price)
+                                    logger.info(f"✅ ZERO-FILL CHASE FILLED! {symbol} {side.upper()} @ {fill_p}")
+                                    self.state.clear_pending_order(start_cooldown=False)
+                                    self.state.set_position(
+                                        symbol=symbol,
+                                        side=side,
+                                        entry_price=fill_p,
+                                        amount=formatted_amt,
+                                        order_id=market_order.get("id", "chase_market"),
+                                    )
+                                    pos = self.state.get_position()
+                                    if pos and config.EMERGENCY_SL_ENABLED:
+                                        self._place_emergency_sl(pos)
+                                    return
+                            except Exception as e:
+                                logger.error(f"❌ Gagal sweep zero-fill chase {symbol}: {e}")
+                        else:
+                            logger.info(
+                                f"🛡️ ZERO-FILL CANCEL SAFE: {symbol} gain ({price_gain:.2f}%) di luar radar chase [{min_gain}% s/d {max_slip}%]. "
+                                f"Order tawar dibatalkan bersih, modal aman!"
+                            )
             return
         
         status = self.order_mgr.check_order_filled(symbol, order_id)
@@ -557,6 +612,12 @@ class TradingBot:
                         return True, f"BTC Sideways & RSI 15m ({btc_rsi_15m:.1f} >= {chop_max_long_rsi:.1f}) di atap resisten kotak saat antri Long"
                     elif side == "short" and btc_rsi_15m >= chop_min_short_rsi:
                         return True, f"BTC Sideways & RSI 15m ({btc_rsi_15m:.1f} >= {chop_min_short_rsi:.1f}) sedang memantul naik saat antri Short"
+                
+                # Extreme Overbought Guard saat antri LONG (semua regime)
+                btc_max_long_rsi = getattr(config, "BTC_MAX_LONG_RSI", 80.0)
+                btc_rsi_15m = self.signal_engine._get_btc_rsi_15m()
+                if side == "long" and btc_rsi_15m >= btc_max_long_rsi:
+                    return True, f"BTC 15m RSI ({btc_rsi_15m:.1f} >= {btc_max_long_rsi:.1f}) overbought ekstrem rawan dump saat antri Long"
                     
             return False, None
         except Exception as e:
@@ -682,12 +743,14 @@ class TradingBot:
             self.state.set_last_signal(best_signal)
             self.state.set_status("trading")
             suggested_p = best_signal.get("suggested_entry_price")
+            is_rocket = best_signal.get("is_rocket", False)
             order = self.order_mgr.place_entry_order(
                 symbol=symbol,
                 signal=signal,
                 current_price=price,
                 score=score,
                 suggested_price=suggested_p,
+                is_rocket=is_rocket,
             )
             
             if order:

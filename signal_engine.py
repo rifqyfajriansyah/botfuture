@@ -563,6 +563,11 @@ class SignalEngine:
                 if can_short and btc_rsi_15m < btc_min_short_rsi:
                     logger.info(f"🚫 SHORT {symbol} diblokir: BTC 15m RSI ({btc_rsi_15m:.1f}) oversold (< {btc_min_short_rsi}), rawan rebound kilat!")
                     can_short = False
+                # 4. Dilarang keras LONG di pucuk jenuh beli ekstrem (Anti-pucuk / Overbought Ekstrem, hemat -$33.69 USDT)
+                btc_max_long_rsi = getattr(config, "BTC_MAX_LONG_RSI", 80.0)
+                if can_long and btc_rsi_15m >= btc_max_long_rsi:
+                    logger.info(f"🚫 LONG {symbol} diblokir: BTC 15m RSI ({btc_rsi_15m:.1f} >= {btc_max_long_rsi:.1f}), overbought ekstrem rawan dump pucuk!")
+                    can_long = False
                 
                 if btc_mode == "smart":
                     # 1. Jika BTC AKTIF Flash Crash / Dump (lock aktif): Blokir LONG mutlak!
@@ -692,15 +697,30 @@ class SignalEngine:
                         
                         # Hitung Dynamic Confluence Entry Price (EMA 21 & ATR Pullback)
                         if ema_21_val > 0 and atr_val > 0 and getattr(config, "DYNAMIC_PULLBACK_ENTRY_ENABLED", True):
-                            atr_pullback = current_close - (atr_mult * atr_val)
-                            suggested_entry = max(ema_21_val, atr_pullback)
-                            # Batas aman: diskon antara 0.15% s/d 1.0% dari harga saat ini
-                            # Jika kondisi makro adverse, wajib diskon lebih dalam (+0.20% -> min diskon 0.35%)
-                            min_disc = 0.9965 if is_macro_adverse_long else 0.9985
-                            max_discount_price = current_close * 0.990
-                            min_discount_price = current_close * min_disc
-                            suggested_entry = max(max_discount_price, min(min_discount_price, suggested_entry))
-                            result["suggested_entry_price"] = suggested_entry
+                            try:
+                                vol_r_long = float(str(details_long.get("vol_ratio", "1.0")).replace("x", ""))
+                            except Exception:
+                                vol_r_long = 1.0
+
+                            is_rocket_long = (score_long >= getattr(config, "ROCKET_MIN_SCORE", 90)) and (vol_r_long >= getattr(config, "ROCKET_MIN_VOL_RATIO", 1.80))
+                            if is_rocket_long:
+                                micro_offset = getattr(config, "ROCKET_ENTRY_OFFSET_PERCENT", 0.04) / 100.0
+                                suggested_entry = current_close * (1.0 - micro_offset)
+                                result["suggested_entry_price"] = suggested_entry
+                                result["is_rocket"] = True
+                                logger.info(
+                                    f"🚀 ROCKET ENTRY LONG for {symbol}: Score {score_long}, Vol {vol_r_long:.2f}x "
+                                    f"-> Fast-fill mikro @ {suggested_entry:.6f} (-{micro_offset*100:.2f}%)!"
+                                )
+                            else:
+                                atr_pullback = current_close - (atr_mult * atr_val)
+                                suggested_entry = max(ema_21_val, atr_pullback)
+                                min_disc = 0.9965 if is_macro_adverse_long else 0.9970
+                                max_discount_price = current_close * 0.990
+                                min_discount_price = current_close * min_disc
+                                suggested_entry = max(max_discount_price, min(min_discount_price, suggested_entry))
+                                result["suggested_entry_price"] = suggested_entry
+                                result["is_rocket"] = False
                         
                         logger.info(
                             f"  🎯 TPLR LONG VALIDATED for {symbol} | Score: {score_long} | "
@@ -749,15 +769,30 @@ class SignalEngine:
                         
                         # Hitung Dynamic Confluence Entry Price (EMA 21 & ATR Pullback)
                         if ema_21_val > 0 and atr_val > 0 and getattr(config, "DYNAMIC_PULLBACK_ENTRY_ENABLED", True):
-                            atr_pullback = current_close + (atr_mult * atr_val)
-                            suggested_entry = min(ema_21_val, atr_pullback)
-                            # Batas aman: premi tawar antara 0.15% s/d 1.0% dari harga saat ini
-                            # Jika kondisi makro adverse (alts dipompa), wajib antri di pucuk lebih tinggi (+0.35%)
-                            min_prem = 1.0035 if is_macro_adverse_short else 1.0015
-                            max_premium_price = current_close * 1.010
-                            min_premium_price = current_close * min_prem
-                            suggested_entry = min(max_premium_price, max(min_premium_price, suggested_entry))
-                            result["suggested_entry_price"] = suggested_entry
+                            try:
+                                vol_r_short = float(str(details_short.get("vol_ratio", "1.0")).replace("x", ""))
+                            except Exception:
+                                vol_r_short = 1.0
+
+                            is_rocket_short = (score_short >= getattr(config, "ROCKET_MIN_SCORE", 90)) and (vol_r_short >= getattr(config, "ROCKET_MIN_VOL_RATIO", 1.80))
+                            if is_rocket_short:
+                                micro_offset = getattr(config, "ROCKET_ENTRY_OFFSET_PERCENT", 0.04) / 100.0
+                                suggested_entry = current_close * (1.0 + micro_offset)
+                                result["suggested_entry_price"] = suggested_entry
+                                result["is_rocket"] = True
+                                logger.info(
+                                    f"🚀 ROCKET ENTRY SHORT for {symbol}: Score {score_short}, Vol {vol_r_short:.2f}x "
+                                    f"-> Fast-fill mikro @ {suggested_entry:.6f} (+{micro_offset*100:.2f}%)!"
+                                )
+                            else:
+                                atr_pullback = current_close + (atr_mult * atr_val)
+                                suggested_entry = min(ema_21_val, atr_pullback)
+                                min_prem = 1.0035 if is_macro_adverse_short else 1.0030
+                                max_premium_price = current_close * 1.010
+                                min_premium_price = current_close * min_prem
+                                suggested_entry = min(max_premium_price, max(min_premium_price, suggested_entry))
+                                result["suggested_entry_price"] = suggested_entry
+                                result["is_rocket"] = False
                         
                         logger.info(
                             f"  🎯 TPLR SHORT VALIDATED for {symbol} | Score: {score_short} | "

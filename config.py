@@ -78,6 +78,7 @@ BTC_SLIP_MAX_15M_PCT = 0.14                 # Dilarang LONG jika lilin 15m BTC s
 BTC_CHOP_MAX_LONG_RSI = 60.0               # [Adaptive Chop Gate] Di pasar Sideways, dilarang LONG jika BTC 15m RSI >= 60.0 (atap resisten kotak)
 BTC_CHOP_MIN_SHORT_RSI = 58.0              # [Adaptive Chop Gate] Di pasar Sideways, dilarang SHORT jika BTC 15m RSI >= 58.0 (BTC sedang memantul naik)
 BTC_MIN_SHORT_RSI = 32.0                    # Dilarang buka SHORT jika RSI 15m BTC < 32 (jenuh jual di dasar support rawan memantul)
+BTC_MAX_LONG_RSI = 80.0                     # Dilarang buka LONG jika RSI 15m BTC >= 80 (jenuh beli ekstrem di pucuk rawan dump kilat, hemat -$33.69 USDT)
 BTC_CHOP_RSI_CRASH_FLOOR = 40.0             # DILARANG KERAS BUKA LONG jika RSI 15m BTC < 40 (pasar dingin/sedang dump parah)
 ANOMALY_MIN_SCORE = 90                      # Skor sinyal wajib >= 90 (Grade S) untuk boleh decoupling lawan arus BTC
 ANOMALY_MIN_VOL_RATIO = 1.60                # Volume wajib >= 1.60x SMA 20 (Smart Money nyata) untuk boleh lawan arus BTC
@@ -154,7 +155,7 @@ TRAILING_STOP_OFFSET = 0.85                 # Offset fallback di 0.85%
 
 # 3. FLEXIBLE STALL GUARD (Deteksi Bensin Habis & Moonbag Protector)
 STALL_GUARD_ENABLED = True           # Aktifkan deteksi bensin habis
-STALL_GUARD_CLOSE_FULL = False       # REVOLUSI: Jual 50% saja, jangan 100%! Sisa 50% jadi Moonbag
+STALL_GUARD_CLOSE_FULL = True        # TEBAS 100%: Kunci cuan utuh saat bensin habis / rejection wick! (Koin roket tanpa wick tetap aman moonbag via Dynamic TP)
 STALL_GUARD_TRIGGER_RATIO = 0.60     # Aktif di 60% perjalanan menuju Target TP Dinamis
 STALL_GUARD_MIN_PROFIT_FLOOR = 1.10  # Paling cepat aktif di profit +1.10% (di atas radar BEP 0.80%)
 STALL_GUARD_DYNAMIC_PULLBACK_RATIO = 0.40 # Toleransi melorot 0.40x ATR koin dari peak
@@ -163,27 +164,45 @@ STALL_GUARD_MAX_PULLBACK_PERCENT = 0.60   # Maksimal melorot 0.60% (koin roket)
 STALL_GUARD_WICK_PERCENT = 30.0           # Ekor jarum atas rejection wick >= 30% lilin 15m
 STALL_GUARD_MIN_EXIT_PROFIT = 0.75        # Menjamin eksekusi stall guard tetap cuan bersih ~$5+
 
+# =============================================================================
+# SMART DUAL-MODE ENTRY (JALUR ROKET VS JALUR NAWAR)
+# =============================================================================
+# Jalur 1: Super Breakout / Koin Roket (JANGAN NAWAR JAUH - ANTI KETINGGALAN KERETA)
+ROCKET_MIN_SCORE = 90                   # Skor minimum sinyal super kuat (Grade A+)
+ROCKET_MIN_VOL_RATIO = 1.80             # Volume ledakan minimal 1.80x SMA 20
+ROCKET_ENTRY_OFFSET_PERCENT = 0.04      # Offset mikro sangat tipis (0.04%) agar langsung auto-fill
+ROCKET_TIMEOUT_MINUTES = 3              # Timeout cepat 3 menit (koin roket langsung jalan)
+
+# Jalur Ekstra: Zero-Fill Momentum Chase on Timeout (Dinonaktifkan sesuai instruksi user)
+ZERO_FILL_CHASE_ENABLED = False         # Dinonaktifkan: jika order tawar belum keisi saat timeout, cancel murni tanpa kejar pasar!
+ZERO_FILL_CHASE_MIN_GAIN_PERCENT = 0.08 # Koin sudah mulai bergerak ke arah sinyal minimal +0.08%
+ZERO_FILL_CHASE_MAX_SLIPPAGE_PERCENT = 0.35 # Maksimal toleransi selisih harga dari sinyal (0.35%)
+
 # STALL GUARD KHUSUS KOIN MATANG / BERUMUR (>= 120 Menit)
 STALL_GUARD_AGED_MIN_PROFIT_PERCENT = 1.05
 STALL_GUARD_AGED_PULLBACK_PERCENT = 0.32
 STALL_GUARD_AGED_MIN_EXIT_PROFIT = 0.60
 
 # =============================================================================
-# 3b. MID-RANGE PROFIT GUARD (PENGAMAN AREA 0.0% s/d +0.80%)
+# 3b. CHOPPY & SIDEWAYS EXHAUSTION TEBAS ("MENTOK $7 - $11 USD GAKUAT TEBAS")
 # =============================================================================
-# Filosofi:
-# - Di bawah +0.50%: Koin bebas bergerak dan bernapas tanpa diganggu.
-# - Jika sudah terbang masuk zona menengah (>= +0.55% s/d +0.60% / cuan ~$4):
-#   Koin terbukti punya momentum, tapi belum sampai ke radar BEP statis (+0.80%).
-# - Jika dari puncak tersebut koin melorot kembali ke pintu modal (profit <= +0.10% / BEP cover fee):
-#   Bot mengamankan posisi agar modal selamat dan tidak berbalik menjadi kerugian tekor!
-# CATATAN AUDIT 312 TRADES: Dinonaktifkan (False) karena kanibal terhadap koin runner (2Z, RENDER, DOT, W, APR)
-# yang sedang pullback normal sebelum meledak ke TP1 (+0.85%). Sistem sudah dilindungi TP1 & Binance BEP!
-MID_RANGE_GUARD_ENABLED = False
-MID_RANGE_TRIGGER_PROFIT = 0.55             # Aktif HANYA jika koin sudah pernah naik minimal +0.55% (cuan ~$3.8+)
-MID_RANGE_LOCK_PROFIT = 0.08                # Batas aman di BEP tipis (+0.08% cover fee Binance, modal utuh)
+# Filosofi Disiplin User:
+# 1. Khusus saat pasar Choppy / Sideways (BTC Sideways ATAU ADX koin < 22 / lemas):
+#    - Begitu floating profit menyentuh area target $7 - $11 USD (peak >= +0.50% / ~$7 USD).
+#    - Jika koin terbukti "GAK KUAT" (melorot >= 0.16% dari peak ATAU ada rejection wick >= 25%):
+#      -> TEBAS 100% via Market Order! Bungkus cuan tunai langsung, jangan dibiarkan menguap balik!
+# 2. Di pasar Normal / Trending / Gacor (ADX >= 25 & BTC Trending):
+#    - Koin TIDAK dipotong di $7-$11, dibiarkan lari mengejar TP / Checkpoint Moonbag.
+#    - Tetap diproteksi Auto-BEP Stop di +0.50% (zero-risk trade).
+CHOPPY_SIDEWAYS_TEBAS_ENABLED = True          # Tebas koin gakuat khusus saat pasar choppy/sideways
+CHOPPY_TEBAS_MIN_USD = 7.0                    # Ambang bawah target choppy ($7 USD / ~+0.50%)
+CHOPPY_TEBAS_MAX_USD = 11.0                   # Ambang atas target choppy ($11 USD / ~+0.75%-0.85%)
+CHOPPY_TEBAS_MIN_PEAK_PERCENT = 0.50          # Atau persentase kenaikan peak >= +0.50%
+CHOPPY_TEBAS_MAX_PULLBACK_PERCENT = 0.16      # Toleransi melorot dari peak (melorot >= 0.16% = GAKUAT)
+CHOPPY_TEBAS_WICK_PERCENT = 25.0              # Rejection wick lilin 15m >= 25% = bensin habis / reject
+CHOPPY_TEBAS_MIN_EXIT_PROFIT_USD = 4.0        # Menjamin saat tebas minimal tetap cuan bersih ~$4+ USD
 
-# =============================================================================
+
 # =============================================================================
 # CHOPPY AUTO-BEP & ADAPTIVE REGIME EXIT (PENGAMAN PASAR CHOPPY VS GACOR)
 # =============================================================================
@@ -198,7 +217,7 @@ MID_RANGE_LOCK_PROFIT = 0.08                # Batas aman di BEP tipis (+0.08% co
 #           longgar tanpa mencekik koin prematur, modal terlindungi 100%!
 #        b. CHOPPY PARTIAL TP: Target Partial TP 1 (CP1) di +0.85% untuk langsung
 #           mengunci 50% muatan kas ke dompet (cuan pasti ~$1.65 - $1.80 USDT).
-#        c. Sisa 50% (Moonbag) dikawal trailing berjarak -0.45% mengejar +1.5% s/d +2.0%+.
+#        c. Sisa 50% (Moonbag) dikawal trailing berjarak -0.22% mengejar +1.5% s/d +2.0%+.
 #    - Jika ADX >= 25 dan DI searah (Pasar Gacor / Strong Trend):
 #      * Mode Gacor: Target CP1 normal (+1.45% s/d +1.80%) dengan Trailing Ratchet lega.
 CHOPPY_AUTO_BEP_ENABLED = True
@@ -212,18 +231,18 @@ CHOPPY_TP1_PERCENT = 0.85                    # Alias TP1 koin choppy (+0.85%)
 # TARGET DISIPLIN HARIAN (COMPOUNDING SNOWBALL) & STEPPED RATCHET CHOPPY
 # =============================================================================
 DAILY_TARGET_PROFIT_PERCENT = 10.0            # Target cuan harian dinamis (10% dari modal akun)
-CHOPPY_RATCHET_TRIGGER_PERCENT = 0.70         # Stepped ratchet mulai trailing ketat di pasar choppy mulai +0.70%
-CHOPPY_RATCHET_TRAIL_PERCENT = 0.45           # Jarak kawal bernapas sisa moonbag (0.45% di belakang harga pucuk)
+CHOPPY_RATCHET_TRIGGER_PERCENT = 0.50         # Stepped ratchet mulai trailing ketat di pasar choppy mulai +0.50%
+CHOPPY_RATCHET_TRAIL_PERCENT = 0.22           # Jarak kawal rapat 0.22% dari peak (kunci cuan, anti balik ke BEP!)
 MOONBAG_TARGET_USD = 20.0                    # Target puncak profit satu trade ($20 USD | ~+2.72% harga)
 
 # =============================================================================
 # STAGNATION & TIME-STOP LOSS GUARDS (PENGAMAN KALAH SEMUA REGIME)
 # =============================================================================
-# Lapis 1: Stagnant Early Cut (Koin mandul 20-30 menit yang tak pernah naik dan minus)
+# Lapis 1: Stagnant Early Cut (Koin mandul yang tak pernah naik dan minus)
 STAGNANT_EARLY_CUT_ENABLED = True             # Potong dini koin lemas mandul
-STAGNANT_EARLY_CUT_MINUTES = 20               # Jika sudah berjalan 20 menit (> 1.3 candle 15m)
+STAGNANT_EARLY_CUT_MINUTES = 35               # Jika sudah berjalan 35 menit (> 2.3 candle 15m, beri ruang retest wajar)
 STAGNANT_EARLY_CUT_MAX_HP = 0.20              # Dan tidak pernah naik sama sekali (highest profit < +0.20%)
-STAGNANT_EARLY_CUT_LOSS_THRESHOLD = -0.60     # Dan floating minus <= -0.60% -> Tebas di -$2.30 bukan -$5!
+STAGNANT_EARLY_CUT_LOSS_THRESHOLD = -0.80     # Dan floating minus <= -0.80% -> Toleransi retest wajar 15m (-0.60% aman dari premature cut)
 
 # Lapis 2: Absolute Stagnation Time-Stop (> 80 Menit / > 5 Lilin 15m)
 # CATATAN AUDIT 312 TRADES: 39 trade cuan butuh 50-90m (+120 USDT). Dilonggarkan ke 80m
