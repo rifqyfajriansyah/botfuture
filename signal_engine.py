@@ -197,21 +197,21 @@ class SignalEngine:
                 bias = self._flash_lock_bias
                 rem_m = (self._flash_lock_until - now) / 60
                 logger.info(f"🛡️ BTC Flash {self._flash_lock_bias.upper()} Lock aktif (Sisa: {rem_m:.1f}m) - Mengunci arah pasar dari whipsaw.")
-            elif is_btc_chop:
-                # BTC terdeteksi bergerak sempit dalam Chop Zone (Sideways)
-                bias = "sideways"
             elif ema_21 > ema_55 and close_1h > ema_55:
-                # Jika 1h bullish tapi 15m mendadak dump (RSI < 40), jangan sebut bullish
+                # 1H Bullish: Jika 15m mendadak dump (RSI < 40), netralisir
                 if rsi_15m < 40:
                     bias = "neutral"
                 else:
                     bias = "bullish"
             elif ema_21 < ema_55 and close_1h < ema_55:
-                # Jika 1h bearish tapi 15m mendadak pump (RSI > 60), jangan sebut bearish
+                # 1H Bearish: Jika 15m mendadak pump (RSI > 60), netralisir
                 if rsi_15m > 60:
                     bias = "neutral"
                 else:
                     bias = "bearish"
+            elif is_btc_chop:
+                # BTC terdeteksi bergerak sempit & datar tanpa arah tren jelas (Chop Zone / Sideways)
+                bias = "sideways"
                     
             self._last_btc_check_time = now
             self._cached_btc_bias = bias
