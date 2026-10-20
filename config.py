@@ -148,15 +148,15 @@ PARTIAL_TP_PERCENT = 2.42            # Fallback statis jika data ATR tidak terse
 # 2. FLEXIBLE TRAILING PROFIT RATCHET (Tangga Pengawalan Adaptif)
 DYNAMIC_TRAILING_ENABLED = True
 TRAILING_FIRST_CHECKPOINT_ATR_RATIO = 1.4  # Checkpoint 1 aktif lebih cepat (1.4x ATR koin)
-TRAILING_FIRST_CHECKPOINT_MIN_PERCENT = 0.85 # Checkpoint 1 aktif di +0.85% (Lantai Anti-BEP tebas cuan aman ~$10 USD!)
-TRAILING_FIRST_CHECKPOINT_MAX_PERCENT = 1.10 # Plafon maksimal CP1 aktif paling lambat di +1.10%
+TRAILING_FIRST_CHECKPOINT_MIN_PERCENT = 0.95 # Checkpoint 1 aktif di +0.95% (Napas lega, anti kejilat kocokan awal)
+TRAILING_FIRST_CHECKPOINT_MAX_PERCENT = 1.30 # Plafon maksimal CP1 aktif di +1.30%
 TRAILING_FIRST_STOP_ATR_RATIO = 0.80       # Kunci stop loss pertama di 0.80x ATR
-TRAILING_FIRST_STOP_MIN_PERCENT = 0.65     # Minimal stop loss terkunci di +0.65% (Duit masuk kantong!)
-TRAILING_FIRST_STOP_MAX_PERCENT = 0.90     # Plafon stop 1 di +0.90%
+TRAILING_FIRST_STOP_MIN_PERCENT = 0.45     # Stop 1 terkunci di +0.45% (Jarak napas 0.50% lega! Cuan ~$6 aman di atas fee)
+TRAILING_FIRST_STOP_MAX_PERCENT = 0.70     # Plafon stop 1 di +0.70%
 TRAILING_STOP_OFFSET_ATR_RATIO = 0.80      # Jarak kawal stop 0.80x ATR koin (ruang napas lega)
-TRAILING_STOP_OFFSET_MIN = 0.65            # Minimal jarak stop 0.65% (anti kejilat spread)
+TRAILING_STOP_OFFSET_MIN = 0.50            # Minimal jarak stop 0.50% (lega, anti kejilat noise lilin)
 TRAILING_STOP_OFFSET_MAX = 1.00            # Maksimal jarak stop 1.00% (agar cuan terjaga)
-TRAILING_CHECKPOINT_STEP = 0.40            # Step checkpoint bertingkat berikutnya (+0.40% cepat naik)
+TRAILING_CHECKPOINT_STEP = 0.45            # Step checkpoint bertingkat (+0.45% per level)
 
 # Fallback statis trailing (jika ATR tidak tersedia)
 TRAILING_FIRST_CHECKPOINT_PERCENT = 1.65    # Checkpoint 1 fallback di +1.65%
@@ -256,8 +256,8 @@ CHOPPY_TP1_PERCENT = 0.85                    # Alias TP1 koin choppy (+0.85%)
 # TARGET DISIPLIN HARIAN (COMPOUNDING SNOWBALL) & STEPPED RATCHET CHOPPY
 # =============================================================================
 DAILY_TARGET_PROFIT_PERCENT = 10.0            # Target cuan harian dinamis (10% dari modal akun)
-CHOPPY_RATCHET_TRIGGER_PERCENT = 0.50         # Stepped ratchet mulai trailing ketat di pasar choppy mulai +0.50%
-CHOPPY_RATCHET_TRAIL_PERCENT = 0.22           # Jarak kawal rapat 0.22% dari peak (kunci cuan, anti balik ke BEP!)
+CHOPPY_RATCHET_TRIGGER_PERCENT = 0.50         # Stepped ratchet mulai trailing di pasar choppy mulai +0.50%
+CHOPPY_RATCHET_TRAIL_PERCENT = 0.38           # Jarak kawal lega 0.38% dari peak (napas aman, anti kejilat kocokan!)
 MOONBAG_TARGET_USD = 20.0                    # Target puncak profit satu trade ($20 USD | ~+2.72% harga)
 
 # =============================================================================

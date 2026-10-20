@@ -526,12 +526,15 @@ class TrailingManager:
                     desired_lock_pct = round(max(0.12, highest_p - ratchet_trail), 2)
                     
                     # 🛡️ PROFIT FLOOR RATCHET (ANTI CUAN MELOROT KE BEP):
-                    # Jika peak sudah >= +1.50% (cuan ~$8), kunci stop minimal di +0.65% (pasti cuan ~$3.5+)
+                    # Jika peak sudah >= +0.95%: Kunci stop minimal di +0.45% (Breathing room 0.50% LEGA, anti kejilat & cuan aman!)
+                    if highest_p >= 0.95:
+                        desired_lock_pct = max(desired_lock_pct, 0.45)
+                    # Jika peak sudah >= +1.50%: Kunci stop minimal di +0.75% (pasti cuan ~$10+)
                     if highest_p >= 1.50:
-                        desired_lock_pct = max(desired_lock_pct, 0.65)
-                    # Jika peak sudah >= +1.80% (cuan ~$10+), kunci stop minimal di +1.00% (pasti cuan ~$5.5+, HARAM BEP!)
+                        desired_lock_pct = max(desired_lock_pct, 0.75)
+                    # Jika peak sudah >= +1.80%: Kunci stop minimal di +1.10% (HARAM BEP!)
                     if highest_p >= 1.80:
-                        desired_lock_pct = max(desired_lock_pct, 1.00)
+                        desired_lock_pct = max(desired_lock_pct, 1.10)
                         
                     current_locked_pct = float(pos.get("choppy_ratchet_locked_pct") or 0.0)
                     
