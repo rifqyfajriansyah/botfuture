@@ -21,7 +21,7 @@ TRADING_MODE = os.getenv("TRADING_MODE", "testnet")  # 'live' atau 'testnet'
 # =============================================================================
 LEVERAGE = 3                    # Leverage 3x (Aman & terkontrol)
 MARGIN_MODE = "isolated"        # Isolated margin (lebih aman per posisi)
-BALANCE_USAGE = 0.90            # Gunakan 90% balance (maksimalisasi profit dengan entry terfilter ketat)
+BALANCE_USAGE = 0.65            # Gunakan 65% balance (~$850 notional di saldo $436, porsi sehat & anti over-leverage)
 MAX_POSITIONS = 1               # Hanya 1 posisi aktif
 # =============================================================================
 # CAPITAL FLOOR GUARD (PENGAMAN MODAL POKOK 5 JUTA RUPIAH)
@@ -51,8 +51,8 @@ COMBAT_TRIGGER_DRAWDOWN = -0.40         # Masuk mode siaga cepat jika drawdown <
 # =============================================================================
 # ASYMMETRIC LONG & SHORT DYNAMICS & BTC TREND FILTER (VALIDASI HISTORIS OKTOBER)
 # =============================================================================
-LONG_MAX_RSI = 56.0                             # Anti-Pucuk Overbought: Dilarang LONG jika RSI > 56.0
-SHORT_MIN_RSI = 44.0                            # Anti-Dasar Jurang: Dilarang SHORT jika RSI < 44.0 (anti kegocek di dasar support)
+LONG_MAX_RSI = 52.0                             # Anti-Pucuk Sejati: Dilarang LONG jika RSI > 52.0 (wajib beli diskon)
+SHORT_MIN_RSI = 48.0                            # Anti-Dasar Sejati: Dilarang SHORT jika RSI < 48.0 (wajib retest resisten)
 MIN_ENTRY_REJECTION_WICK_PERCENT = 25.0         # Wick minimal 25% (ekor penolakan nyata, menolak lilin botak)
 CHOP_MIN_REJECTION_WICK_PERCENT = 30.0          # Saat Sideways/Chop, Upper Wick SHORT wajib >= 30% (anti false breakout)
 SHORT_TP1_PERCENT = 0.60                        # TP1 khusus SHORT lebih cepat di +0.60% (kunci cuan anti bounce-back)
@@ -61,8 +61,8 @@ COUNTER_TREND_ALLOWED = True                     # Boleh trade lawan arah BTC as
 COUNTER_TREND_MIN_SCORE = 90                     # Skor sinyal wajib Grade S (>= 90)
 COUNTER_TREND_MIN_WICK = 35.0                    # Wick rejection ekor penolakan wajib tebal >= 35%
 COUNTER_TREND_MIN_VOL_RATIO = 1.35               # Volume aliran dana nyata >= 1.35x
-COUNTER_TREND_MAX_LONG_RSI = 55.0                # LONG saat BTC Bearish: RSI koin dilarang di pucuk (maks 55.0)
-COUNTER_TREND_MIN_SHORT_RSI = 46.0               # SHORT saat BTC Bullish: RSI koin dilarang di dasar (min 46.0)
+COUNTER_TREND_MAX_LONG_RSI = 52.0                # LONG saat BTC Bearish: RSI koin dilarang di pucuk (maks 52.0)
+COUNTER_TREND_MIN_SHORT_RSI = 48.0               # SHORT saat BTC Bullish: RSI koin dilarang di dasar (min 48.0)
 WHALE_RESCUE_VOLUME_RATIO = 1.80             # Pintu VIP Paus: Ledakan volume >= 1.80x
 SUPER_WICK_RESCUE_RATIO = 50.0               # Pintu VIP Super-Wick: Ekor monster >= 50%
 SUPER_WICK_MIN_VOL = 0.50                    # Toleransi volume minimum untuk Super-Wick (0.50x)

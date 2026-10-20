@@ -351,8 +351,8 @@ class SignalEngine:
         if last["close"] < ema_21 * 0.998:
             return False, 0, {"reason": "close_below_ema21"}
             
-        # 7. RSI Sweet Spot (40 s/d 56): punya ruang untuk naik kencang, anti-pucuk overbought
-        max_long_rsi = getattr(config, "LONG_MAX_RSI", 56.0)
+        # 7. RSI Sweet Spot (40 s/d 52): punya ruang untuk naik kencang, anti-pucuk overbought
+        max_long_rsi = getattr(config, "LONG_MAX_RSI", 52.0)
         if rsi < 40 or rsi > max_long_rsi:
             return False, 0, {"reason": f"rsi_out_of_sweet_spot_{rsi:.1f}_max_{max_long_rsi}"}
             
@@ -463,9 +463,8 @@ class SignalEngine:
         if last["close"] > ema_21 * 1.002:
             return False, 0, {"reason": "close_above_ema21"}
             
-        # 7. RSI Sweet Spot (44 s/d 60): punya ruang untuk dump, anti-dasar jurang oversold
-        # Khusus di pasar Sideways/Neutral rawan squeeze: wajib RSI >= 46
-        min_short_rsi = 46.0 if is_chop else getattr(config, "SHORT_MIN_RSI", 44.0)
+        # 7. RSI Sweet Spot (48 s/d 60): punya ruang untuk dump, anti-dasar jurang oversold
+        min_short_rsi = getattr(config, "SHORT_MIN_RSI", 48.0)
         if rsi < min_short_rsi or rsi > 60:
             return False, 0, {"reason": f"rsi_out_of_sweet_spot_{rsi:.1f}_min_{min_short_rsi}"}
             
