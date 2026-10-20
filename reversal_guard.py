@@ -189,10 +189,10 @@ class ReversalGuard:
                     raw_rebound = pos.get("rebound_peak_pct")
                     rebound_peak_pct = float(raw_rebound) if raw_rebound is not None else lowest_pct
                     
-                    min_drawdown = getattr(config, "BOUNCE_FAILURE_MIN_DRAWDOWN_PERCENT", -0.75)
+                    min_drawdown = getattr(config, "BOUNCE_FAILURE_MIN_DRAWDOWN_PERCENT", -0.50)
                     min_rebound = getattr(config, "BOUNCE_FAILURE_MIN_REBOUND_PERCENT", 0.35)
                     slip_tol = getattr(config, "BOUNCE_FAILURE_SLIPPAGE_TOLERANCE", 0.25)
-                    max_loss_pct = getattr(config, "BOUNCE_FAILURE_MAX_LOSS_PERCENT", -1.05)
+                    max_loss_pct = getattr(config, "BOUNCE_FAILURE_MAX_LOSS_PERCENT", -0.75)
                     max_loss_usdt = getattr(config, "MAX_LOSS_USDT_CAP", -4.20)
                     
                     # Kondisi Dead-Cat Bounce yang Valid:
@@ -241,8 +241,12 @@ class ReversalGuard:
                     approx_pnl_usdt = (profit_pct / 100.0) * (entry_price * float(pos.get("amount", 0)))
                     is_max_loss_breached = (profit_pct <= max_loss_pct)
                     
-                    if is_dead_cat_bounce or is_max_loss_breached:
-                        cut_cause = "dead_cat_bounce_rejection" if is_dead_cat_bounce else f"hard_max_loss_cap ({profit_pct:.2f}%)"
+                    # Saklar pengaman Dead-Cat Bounce:
+                    # Hanya eksekusi tebasan Dead-Cat Bounce jika saklar config diaktifkan (default False)
+                    allow_dcb_cut = getattr(config, "DEAD_CAT_BOUNCE_CUT_ENABLED", False)
+
+                    if (is_dead_cat_bounce and allow_dcb_cut) or is_max_loss_breached:
+                        cut_cause = "dead_cat_bounce_rejection" if (is_dead_cat_bounce and allow_dcb_cut) else f"hard_max_loss_cap ({profit_pct:.2f}%)"
                         logger.warning(
                             f"🛑 BOUNCE FAILURE / HARD LOSS GUARD CONFIRMED ({cut_cause}) for {symbol}! "
                             f"Profit: {profit_pct:.2f}% | Drawdown: {lowest_pct:.2f}% | EMA55 tested: {has_tested_ema55} -> Membatasi kerugian maksimal murni persentase!"

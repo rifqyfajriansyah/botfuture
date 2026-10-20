@@ -187,19 +187,33 @@ STALL_GUARD_AGED_MIN_EXIT_PROFIT = 0.60
 # 3b. CHOPPY & SIDEWAYS EXHAUSTION TEBAS ("MENTOK $7 - $11 USD GAKUAT TEBAS")
 # =============================================================================
 # Filosofi Disiplin User:
-# 1. Khusus saat pasar Choppy / Sideways (BTC Sideways ATAU ADX koin < 22 / lemas):
-#    - Begitu floating profit menyentuh area target $7 - $11 USD (peak >= +0.50% / ~$7 USD).
-#    - Jika koin terbukti "GAK KUAT" (melorot >= 0.16% dari peak ATAU ada rejection wick >= 25%):
-#      -> TEBAS 100% via Market Order! Bungkus cuan tunai langsung, jangan dibiarkan menguap balik!
-# 2. Di pasar Normal / Trending / Gacor (ADX >= 25 & BTC Trending):
-#    - Koin TIDAK dipotong di $7-$11, dibiarkan lari mengejar TP / Checkpoint Moonbag.
-#    - Tetap diproteksi Auto-BEP Stop di +0.50% (zero-risk trade).
+# =============================================================================
+# CHOPPY SIDEWAYS TEBAS BERJENJANG (FLEXIBLE ADAPTIVE & VOLUME SMART)
+# =============================================================================
+# Filosofi:
+# 1. Koin baru mulai cuan (+0.50% s/d +1.10% / ~$7 s/d $15.4 USD):
+#    - Diberi ruang napas LONGGAR (Pullback 0.24%, Wick 38%).
+#    - Lilin doji semut tipis (< 0.20%) diabaikan agar tidak kaget/prematur.
+# 2. Kondisi Khusus Volume (Whale Climax Alert):
+#    - Jika volume meledak >= 1.6x + jarum reject >= 24%: TEBAS SEKETIKA (CLIMAX_VOL_TEBAS)!
+# 3. Pucuk Matang (>= +1.10% / ~$15.4 USD):
+#    - Disiplin ketat tebas pucuk (Pullback 0.18%, Wick 26%) mengunci profit tertinggi!
 CHOPPY_SIDEWAYS_TEBAS_ENABLED = True          # Tebas koin gakuat khusus saat pasar choppy/sideways
-CHOPPY_TEBAS_MIN_USD = 7.0                    # Ambang bawah target choppy ($7 USD / ~+0.50%)
-CHOPPY_TEBAS_MAX_USD = 11.0                   # Ambang atas target choppy ($11 USD / ~+0.75%-0.85%)
-CHOPPY_TEBAS_MIN_PEAK_PERCENT = 0.50          # Atau persentase kenaikan peak >= +0.50%
-CHOPPY_TEBAS_MAX_PULLBACK_PERCENT = 0.16      # Toleransi melorot dari peak (melorot >= 0.16% = GAKUAT)
-CHOPPY_TEBAS_WICK_PERCENT = 25.0              # Rejection wick lilin 15m >= 25% = bensin habis / reject
+CHOPPY_TEBAS_MIN_PEAK_PERCENT = 0.50          # Mulai aktif saat peak >= +0.50% (~$7 USD)
+CHOPPY_TEBAS_MATURE_PERCENT = 1.10            # Target pucuk matang (+1.10% / ~$15.4 USD) -> REKOR TERTINGGI!
+
+# Fase 1: Ruang Napas Awal (+0.50% s/d +1.10% / ~$7 s/d $15.4 USD) -> ANTI PREMATUR
+CHOPPY_TEBAS_EARLY_PULLBACK = 0.24            # Napas longgar 0.24% dari peak
+CHOPPY_TEBAS_EARLY_WICK = 38.0                # Hanya tebas jika wick reject ekstrem >= 38%
+CHOPPY_TEBAS_MIN_CANDLE_RANGE = 0.20          # Abaikan wick jika range lilin < 0.20% (anti false rejection doji tipis)
+
+# Fase 2: Pucuk Matang Disiplin (>= +1.10% / ~$15.4 USD) -> AMANKAN CUAN PUNCAK
+CHOPPY_TEBAS_MATURE_PULLBACK = 0.18           # Disiplin ketat melorot >= 0.18%
+CHOPPY_TEBAS_MATURE_WICK = 26.0               # Disiplin tebas jika ada wick reject >= 26%
+
+# Kondisi Khusus Volume: Whale Climax Dump Alert
+CHOPPY_TEBAS_CLIMAX_VOL_RATIO = 1.6           # Volume meledak >= 1.6x rata-rata
+CHOPPY_TEBAS_CLIMAX_WICK = 24.0               # Rejection wick >= 24% saat volume meledak = bandar dumping masif!
 CHOPPY_TEBAS_MIN_EXIT_PROFIT_USD = 4.0        # Menjamin saat tebas minimal tetap cuan bersih ~$4+ USD
 
 
@@ -242,14 +256,14 @@ MOONBAG_TARGET_USD = 20.0                    # Target puncak profit satu trade (
 STAGNANT_EARLY_CUT_ENABLED = True             # Potong dini koin lemas mandul
 STAGNANT_EARLY_CUT_MINUTES = 35               # Jika sudah berjalan 35 menit (> 2.3 candle 15m, beri ruang retest wajar)
 STAGNANT_EARLY_CUT_MAX_HP = 0.20              # Dan tidak pernah naik sama sekali (highest profit < +0.20%)
-STAGNANT_EARLY_CUT_LOSS_THRESHOLD = -0.80     # Dan floating minus <= -0.80% -> Toleransi retest wajar 15m (-0.60% aman dari premature cut)
+STAGNANT_EARLY_CUT_LOSS_THRESHOLD = -0.55     # Dan floating minus <= -0.55% -> Potong dini koin lemas sebelum kena hard stop -0.75%
 
 # Lapis 2: Absolute Stagnation Time-Stop (> 80 Menit / > 5 Lilin 15m)
 # CATATAN AUDIT 312 TRADES: 39 trade cuan butuh 50-90m (+120 USDT). Dilonggarkan ke 80m
-# dan hanya tebas jika profit <= -0.65% (koin konsolidasi minus tipis -0.10% spt XLM/TAO aman!).
+# dan hanya tebas jika profit <= -0.55% (koin konsolidasi minus tipis -0.10% spt XLM/TAO aman!).
 STAGNANT_TIMESTOP_ENABLED = True              # Tutup posisi jika koin tersandera > 80 menit
 STAGNANT_TIMESTOP_MINUTES = 80                # Jika posisi mengambang > 80 menit (> 5 lilin 15m)
-STAGNANT_TIMESTOP_MAX_LOSS = -0.65            # Hanya jika minus lebih dalam dari -0.65% (bukan 0.0%)
+STAGNANT_TIMESTOP_MAX_LOSS = -0.55            # Hanya jika minus lebih dalam dari -0.55% (bukan 0.0%)
 STAGNANT_TIMESTOP_MAX_HP = 0.35               # Dan tak ada daya dorong momentum (highest profit < +0.35%)
 
 # =============================================================================
@@ -319,10 +333,10 @@ BOUNCE_FAILURE_GUARD_ENABLED = True
 DEAD_CAT_BOUNCE_CUT_ENABLED = False              # Nonaktifkan tebas prematur saat wick goyang biasa!
 BOUNCE_FAILURE_REQUIRE_EMA55_TEST = True     # Rem hanya aktif jika harga sudah menguji/menusuk ke batas lantai EMA 55 (Safe Pocket)
 BOUNCE_FAILURE_EMA_BUFFER_PERCENT = 0.52     # Toleransi buffer lantai EMA 55 (0.52% di bawah/atas EMA 55)
-BOUNCE_FAILURE_MIN_DRAWDOWN_PERCENT = -0.90  # Drawdown minimal terhadap entry untuk konfirmasi dip nyata
+BOUNCE_FAILURE_MIN_DRAWDOWN_PERCENT = -0.50  # Drawdown minimal terhadap entry untuk konfirmasi dip nyata (sebelum kena batas keras -0.75%)
 BOUNCE_FAILURE_MIN_REBOUND_PERCENT = 0.35    # Sempat berhasil mantul naik minimal +0.35% harga dari dasar jurang
 BOUNCE_FAILURE_SLIPPAGE_TOLERANCE = 0.25     # Jika setelah mantul harga melorot kembali >= 0.25% dari puncak pantulan -> TEBAS!
-BOUNCE_FAILURE_MAX_LOSS_PERCENT = -1.05      # Batas minus harga maksimal keras (-1.05% harga | Sweet Spot anti-wick gojekan, rugi mentok ~$3.90)
+BOUNCE_FAILURE_MAX_LOSS_PERCENT = -0.75      # Batas minus harga maksimal keras (-0.75% harga | Sweet Spot terbaik, rugi mentok ~$9.80)
 MAX_LOSS_USDT_CAP = -4.20                    # Batas kerugian dolar nominal maksimal (-$4.20 USDT) mutlak!
 
 # =============================================================================
