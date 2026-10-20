@@ -57,7 +57,12 @@ MIN_ENTRY_REJECTION_WICK_PERCENT = 25.0         # Wick minimal 25% (ekor penolak
 CHOP_MIN_REJECTION_WICK_PERCENT = 30.0          # Saat Sideways/Chop, Upper Wick SHORT wajib >= 30% (anti false breakout)
 SHORT_TP1_PERCENT = 0.60                        # TP1 khusus SHORT lebih cepat di +0.60% (kunci cuan anti bounce-back)
 SHORT_SIDEWAYS_FULL_TEBAS = True                # Khusus SHORT di Sideways: Tebas 100% langsung di +0.60% via Market Order!
-BTC_STRICT_ASYMMETRIC_WALL = True               # Dinding Baja BTC: BTC Bearish HARAM LONG, BTC Bullish HARAM SHORT
+COUNTER_TREND_ALLOWED = True                     # Boleh trade lawan arah BTC asal TER-CONFIRM
+COUNTER_TREND_MIN_SCORE = 90                     # Skor sinyal wajib Grade S (>= 90)
+COUNTER_TREND_MIN_WICK = 35.0                    # Wick rejection ekor penolakan wajib tebal >= 35%
+COUNTER_TREND_MIN_VOL_RATIO = 1.35               # Volume aliran dana nyata >= 1.35x
+COUNTER_TREND_MAX_LONG_RSI = 55.0                # LONG saat BTC Bearish: RSI koin dilarang di pucuk (maks 55.0)
+COUNTER_TREND_MIN_SHORT_RSI = 46.0               # SHORT saat BTC Bullish: RSI koin dilarang di dasar (min 46.0)
 WHALE_RESCUE_VOLUME_RATIO = 1.80             # Pintu VIP Paus: Ledakan volume >= 1.80x
 SUPER_WICK_RESCUE_RATIO = 50.0               # Pintu VIP Super-Wick: Ekor monster >= 50%
 SUPER_WICK_MIN_VOL = 0.50                    # Toleransi volume minimum untuk Super-Wick (0.50x)

@@ -605,23 +605,20 @@ class SignalEngine:
                         if can_short and btc_rsi_15m >= chop_min_short_rsi:
                             logger.info(f"🚫 SHORT {symbol} diblokir [Adaptive Chop Gate]: BTC Sideways & RSI 15m ({btc_rsi_15m:.1f} >= {chop_min_short_rsi:.1f}) sedang memantul naik!")
                             can_short = False
-                    # 2. Dinding Baja BTC Asimetris:
-                    if getattr(config, "BTC_STRICT_ASYMMETRIC_WALL", True):
-                        if btc_bias == "bearish" and can_long:
-                            logger.info(f"🚫 LONG {symbol} diblokir oleh Dinding Baja BTC: BTC Sedang BEARISH! (Haram lawan arus nakhoda pasar)")
+                    # 2. Smart Decoupling Gate (Lawan Arah Ter-Confirm):
+                    if btc_bias == "bearish" and can_long:
+                        if macro_trend != "bullish":
+                            logger.info(f"🚫 LONG {symbol} diblokir: BTC Bearish & HTF 1H koin ({macro_trend}) bukan Bullish murni (tidak decoupling)")
                             can_long = False
-                        elif btc_bias == "bullish" and can_short:
-                            logger.info(f"🚫 SHORT {symbol} diblokir oleh Dinding Baja BTC: BTC Sedang BULLISH! (Haram short di pasar bull)")
+                        else:
+                            logger.info(f"🔍 LONG {symbol} (Lawan Arah BTC Bearish): HTF 1H Bullish terdeteksi. Menganalisis 4 Pilar Konfirmasi 15m...")
+
+                    elif btc_bias == "bullish" and can_short:
+                        if macro_trend != "bearish":
+                            logger.info(f"🚫 SHORT {symbol} diblokir: BTC Bullish & HTF 1H koin ({macro_trend}) bukan Bearish murni (tidak decoupling)")
                             can_short = False
-                    else:
-                        # 4. Saat BTC 1H Bearish tapi TIDAK sedang Flash Dump (15m tenang):
-                        if btc_bias == "bearish" and can_long and macro_trend != "bullish":
-                            logger.info(f"🚫 LONG {symbol} diblokir: BTC Bearish & HTF 1H koin ini ({macro_trend}) bukan Bullish murni")
-                            can_long = False
-                        # 5. Kebalikannya saat BTC 1H Bullish tapi TIDAK sedang Flash Pump (15m tenang):
-                        elif btc_bias == "bullish" and can_short and macro_trend != "bearish":
-                            logger.info(f"🚫 SHORT {symbol} diblokir: BTC Bullish & HTF 1H koin ini ({macro_trend}) bukan Bearish murni")
-                            can_short = False
+                        else:
+                            logger.info(f"🔍 SHORT {symbol} (Lawan Arah BTC Bullish): HTF 1H Bearish terdeteksi. Menganalisis 4 Pilar Konfirmasi 15m...")
                 else:
                     # Strict Mode (Legacy kaku)
                     if btc_bias == "bearish" and can_long:
@@ -669,20 +666,36 @@ class SignalEngine:
             if can_long:
                 is_long, score_long, details_long = self._check_pullback_long(df_15m)
                 if is_long:
-                    # Validasi Anti-Berenang Melawan Arus BTC (Super Anomaly Check):
+                    # Validasi Anti-Berenang Melawan Arus BTC (5 Pilar Ter-Confirm):
                     if btc_filter_on and not is_btc and btc_bias == "bearish":
-                        anomaly_min_score = getattr(config, "ANOMALY_MIN_SCORE", 85)
-                        anomaly_min_vol = getattr(config, "ANOMALY_MIN_VOL_RATIO", 1.45)
+                        min_score = getattr(config, "COUNTER_TREND_MIN_SCORE", 90)
+                        min_vol = getattr(config, "COUNTER_TREND_MIN_VOL_RATIO", 1.35)
+                        min_wick = getattr(config, "COUNTER_TREND_MIN_WICK", 35.0)
+                        max_long_rsi = getattr(config, "COUNTER_TREND_MAX_LONG_RSI", 55.0)
                         try:
                             vol_r = float(str(details_long.get("vol_ratio", "1.0")).replace("x", ""))
+                            wick_r = float(str(details_long.get("lower_wick_pct", "0.0")).replace("%", ""))
+                            cur_rsi = float(details_long.get("rsi", 50.0))
                         except Exception:
-                            vol_r = 1.0
-                        if score_long < anomaly_min_score or vol_r < anomaly_min_vol:
+                            vol_r, wick_r, cur_rsi = 1.0, 0.0, 50.0
+                            
+                        is_confirmed = (
+                            score_long >= min_score and
+                            vol_r >= min_vol and
+                            wick_r >= min_wick and
+                            cur_rsi <= max_long_rsi
+                        )
+                        if not is_confirmed:
                             logger.info(
-                                f"🚫 LONG {symbol} dibatalkan: BTC Bearish & Altcoin bukan super anomali "
-                                f"(Score: {score_long}/{anomaly_min_score}, Vol: {vol_r:.2f}x/{anomaly_min_vol}x)"
+                                f"🚫 LONG {symbol} (Lawan Arus BTC Bearish) DITOLAK: Belum Ter-Confirm! "
+                                f"[Wick: {wick_r:.1f}%/min {min_wick}%, RSI: {cur_rsi:.1f}/max {max_long_rsi}, Vol: {vol_r:.2f}x/min {min_vol}x, Score: {score_long}/min {min_score}]"
                             )
                             is_long = False
+                        else:
+                            logger.info(
+                                f"⭐ LONG {symbol} (Lawan Arus BTC Bearish) TER-CONFIRM SOLID! "
+                                f"[Wick: {wick_r:.1f}%, RSI: {cur_rsi:.1f}, Vol: {vol_r:.2f}x, Score: {score_long}] -> Lolos Eksekusi Decoupling!"
+                            )
 
                     if is_long:
                         # Validasi Flexible Macro Liquidity Gate (BTCDOM Adaptif)
@@ -742,20 +755,36 @@ class SignalEngine:
             if can_short:
                 is_short, score_short, details_short = self._check_pullback_short(df_15m)
                 if is_short:
-                    # Validasi Anti-Berenang Melawan Arus BTC (Super Anomaly Check):
+                    # Validasi Anti-Berenang Melawan Arus BTC (5 Pilar Ter-Confirm):
                     if btc_filter_on and not is_btc and btc_bias == "bullish":
-                        anomaly_min_score = getattr(config, "ANOMALY_MIN_SCORE", 85)
-                        anomaly_min_vol = getattr(config, "ANOMALY_MIN_VOL_RATIO", 1.45)
+                        min_score = getattr(config, "COUNTER_TREND_MIN_SCORE", 90)
+                        min_vol = getattr(config, "COUNTER_TREND_MIN_VOL_RATIO", 1.40)
+                        min_wick = getattr(config, "COUNTER_TREND_MIN_WICK", 35.0)
+                        min_short_rsi = getattr(config, "COUNTER_TREND_MIN_SHORT_RSI", 46.0)
                         try:
                             vol_r = float(str(details_short.get("vol_ratio", "1.0")).replace("x", ""))
+                            wick_r = float(str(details_short.get("upper_wick_pct", "0.0")).replace("%", ""))
+                            cur_rsi = float(details_short.get("rsi", 50.0))
                         except Exception:
-                            vol_r = 1.0
-                        if score_short < anomaly_min_score or vol_r < anomaly_min_vol:
+                            vol_r, wick_r, cur_rsi = 1.0, 0.0, 50.0
+                            
+                        is_confirmed = (
+                            score_short >= min_score and
+                            vol_r >= min_vol and
+                            wick_r >= min_wick and
+                            cur_rsi >= min_short_rsi
+                        )
+                        if not is_confirmed:
                             logger.info(
-                                f"🚫 SHORT {symbol} dibatalkan: BTC Bullish & Altcoin bukan super anomali "
-                                f"(Score: {score_short}/{anomaly_min_score}, Vol: {vol_r:.2f}x/{anomaly_min_vol}x)"
+                                f"🚫 SHORT {symbol} (Lawan Arus BTC Bullish) DITOLAK: Belum Ter-Confirm! "
+                                f"[Wick: {wick_r:.1f}%/min {min_wick}%, RSI: {cur_rsi:.1f}/min {min_short_rsi}, Vol: {vol_r:.2f}x/min {min_vol}x, Score: {score_short}/min {min_score}]"
                             )
                             is_short = False
+                        else:
+                            logger.info(
+                                f"⭐ SHORT {symbol} (Lawan Arus BTC Bullish) TER-CONFIRM SOLID! "
+                                f"[Wick: {wick_r:.1f}%, RSI: {cur_rsi:.1f}, Vol: {vol_r:.2f}x, Score: {score_short}] -> Lolos Eksekusi Decoupling!"
+                            )
 
                     if is_short:
                         # Validasi Flexible Macro Liquidity Gate (BTCDOM Adaptif)
