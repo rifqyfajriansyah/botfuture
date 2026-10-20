@@ -724,14 +724,31 @@ class SignalEngine:
                             except Exception:
                                 vol_r_long = 1.0
 
-                            is_rocket_long = (score_long >= getattr(config, "ROCKET_MIN_SCORE", 90)) and (vol_r_long >= getattr(config, "ROCKET_MIN_VOL_RATIO", 1.80))
+                            try:
+                                wick_r_long = float(str(details_long.get("lower_wick_pct", "0.0")).replace("%", ""))
+                            except Exception:
+                                wick_r_long = 0.0
+
+                            # Kriteria Fast-Fill Roket (Anti Ketinggalan Kereta):
+                            # 1. Jalur Volume Breakout: Score >= 85 & Volume Spike >= 1.50x
+                            # 2. Jalur Confluence Rejection: Score >= 85 & Lower Wick >= 30% (mantul kokoh dari support)
+                            min_rocket_score = getattr(config, "ROCKET_MIN_SCORE", 85)
+                            min_rocket_vol = getattr(config, "ROCKET_MIN_VOL_RATIO", 1.50)
+                            min_rocket_wick = getattr(config, "ROCKET_MIN_WICK_PERCENT", 30.0)
+
+                            is_vol_rocket = (vol_r_long >= min_rocket_vol)
+                            is_wick_rocket = (wick_r_long >= min_rocket_wick)
+
+                            is_rocket_long = (score_long >= min_rocket_score) and (is_vol_rocket or is_wick_rocket)
                             if is_rocket_long:
-                                micro_offset = getattr(config, "ROCKET_ENTRY_OFFSET_PERCENT", 0.04) / 100.0
+                                micro_offset = getattr(config, "ROCKET_ENTRY_OFFSET_PERCENT", 0.05) / 100.0
                                 suggested_entry = current_close * (1.0 - micro_offset)
                                 result["suggested_entry_price"] = suggested_entry
                                 result["is_rocket"] = True
+                                qualifier = "Vol Spike" if is_vol_rocket else "Rejection Wick"
                                 logger.info(
-                                    f"🚀 ROCKET ENTRY LONG for {symbol}: Score {score_long}, Vol {vol_r_long:.2f}x "
+                                    f"🚀 ROCKET ENTRY LONG for {symbol}: Score {score_long}, {qualifier} confirmed "
+                                    f"(Vol: {vol_r_long:.2f}x, Wick: {wick_r_long:.1f}%) "
                                     f"-> Fast-fill mikro @ {suggested_entry:.6f} (-{micro_offset*100:.2f}%)!"
                                 )
                             else:
@@ -812,14 +829,28 @@ class SignalEngine:
                             except Exception:
                                 vol_r_short = 1.0
 
-                            is_rocket_short = (score_short >= getattr(config, "ROCKET_MIN_SCORE", 90)) and (vol_r_short >= getattr(config, "ROCKET_MIN_VOL_RATIO", 1.80))
+                            try:
+                                wick_r_short = float(str(details_short.get("upper_wick_pct", "0.0")).replace("%", ""))
+                            except Exception:
+                                wick_r_short = 0.0
+
+                            min_rocket_score = getattr(config, "ROCKET_MIN_SCORE", 85)
+                            min_rocket_vol = getattr(config, "ROCKET_MIN_VOL_RATIO", 1.50)
+                            min_rocket_wick = getattr(config, "ROCKET_MIN_WICK_PERCENT", 30.0)
+
+                            is_vol_rocket = (vol_r_short >= min_rocket_vol)
+                            is_wick_rocket = (wick_r_short >= min_rocket_wick)
+
+                            is_rocket_short = (score_short >= min_rocket_score) and (is_vol_rocket or is_wick_rocket)
                             if is_rocket_short:
-                                micro_offset = getattr(config, "ROCKET_ENTRY_OFFSET_PERCENT", 0.04) / 100.0
+                                micro_offset = getattr(config, "ROCKET_ENTRY_OFFSET_PERCENT", 0.05) / 100.0
                                 suggested_entry = current_close * (1.0 + micro_offset)
                                 result["suggested_entry_price"] = suggested_entry
                                 result["is_rocket"] = True
+                                qualifier = "Vol Spike" if is_vol_rocket else "Rejection Wick"
                                 logger.info(
-                                    f"🚀 ROCKET ENTRY SHORT for {symbol}: Score {score_short}, Vol {vol_r_short:.2f}x "
+                                    f"🚀 ROCKET ENTRY SHORT for {symbol}: Score {score_short}, {qualifier} confirmed "
+                                    f"(Vol: {vol_r_short:.2f}x, Wick: {wick_r_short:.1f}%) "
                                     f"-> Fast-fill mikro @ {suggested_entry:.6f} (+{micro_offset*100:.2f}%)!"
                                 )
                             else:

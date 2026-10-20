@@ -178,9 +178,10 @@ STALL_GUARD_MIN_EXIT_PROFIT = 0.75        # Menjamin eksekusi stall guard tetap 
 # SMART DUAL-MODE ENTRY (JALUR ROKET VS JALUR NAWAR)
 # =============================================================================
 # Jalur 1: Super Breakout / Koin Roket (JANGAN NAWAR JAUH - ANTI KETINGGALAN KERETA)
-ROCKET_MIN_SCORE = 90                   # Skor minimum sinyal super kuat (Grade A+)
-ROCKET_MIN_VOL_RATIO = 1.80             # Volume ledakan minimal 1.80x SMA 20
-ROCKET_ENTRY_OFFSET_PERCENT = 0.04      # Offset mikro sangat tipis (0.04%) agar langsung auto-fill
+ROCKET_MIN_SCORE = 85                   # Skor minimum sinyal super kuat (Grade A)
+ROCKET_MIN_VOL_RATIO = 1.50             # Volume ledakan minimal 1.50x SMA 20
+ROCKET_MIN_WICK_PERCENT = 30.0          # Ekor penolakan kokoh minimal 30% (mantul nyata dari support)
+ROCKET_ENTRY_OFFSET_PERCENT = 0.05      # Offset mikro sangat tipis (0.05%) agar langsung auto-fill di retest awal
 ROCKET_TIMEOUT_MINUTES = 3              # Timeout cepat 3 menit (koin roket langsung jalan)
 
 # Jalur Ekstra: Zero-Fill Momentum Chase on Timeout (Dinonaktifkan sesuai instruksi user)

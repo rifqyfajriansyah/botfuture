@@ -91,12 +91,13 @@ class OrderManager:
     # Entry Order (Limit)
     # =========================================================================
     
-    def place_entry_order(self, symbol, signal, current_price, score=None, suggested_price=None):
+    def place_entry_order(self, symbol, signal, current_price, score=None, suggested_price=None, is_rocket=False):
         """
         Place limit order untuk entry posisi dengan Dynamic Confluence Limit & Tiered Fallback.
-        - Jika suggested_price ada: gunakan harga optimal EMA21 / ATR pullback.
-        - High Conviction (score >= 80): offset sangat rapat (0.1%), timeout 10m
-        - Normal Conviction (score 70-79): offset tawar (0.35%), timeout 15m
+        - Jika suggested_price ada: gunakan harga optimal EMA21 / ATR pullback (atau mikro-offset jika rocket).
+        - Rocket Lane (is_rocket=True): Fast-fill rapat, timeout 3m
+        - High Conviction (score >= 80): offset sangat rapat (0.1%), timeout 5m
+        - Normal Conviction (score 70-79): offset tawar (0.35%), timeout 7m
         
         Args:
             symbol: Trading pair (e.g., 'BTC/USDT:USDT')
@@ -104,6 +105,7 @@ class OrderManager:
             current_price: Harga saat ini
             score: Skor sinyal (0-100)
             suggested_price: Harga entry optimal dari SignalEngine (EMA21/ATR pullback)
+            is_rocket: True jika sinyal super momentum (Jalur Roket)
         
         Returns:
             dict | None: Order info jika berhasil, None jika gagal
@@ -138,7 +140,9 @@ class OrderManager:
             self.setup_symbol(symbol)
             
             # Timeout durasi
-            if score is not None and score >= config.HIGH_CONVICTION_SCORE:
+            if is_rocket:
+                timeout_min = getattr(config, "ROCKET_TIMEOUT_MINUTES", 3)
+            elif score is not None and score >= config.HIGH_CONVICTION_SCORE:
                 timeout_min = config.HIGH_CONVICTION_TIMEOUT_MINUTES
             else:
                 timeout_min = config.NORMAL_CONVICTION_TIMEOUT_MINUTES
@@ -147,8 +151,9 @@ class OrderManager:
             if suggested_price is not None and suggested_price > 0 and getattr(config, "DYNAMIC_PULLBACK_ENTRY_ENABLED", True):
                 entry_price = float(suggested_price)
                 gap_pct = abs(current_price - entry_price) / current_price * 100
+                lane_desc = "🚀 ROCKET FAST-FILL" if is_rocket else "🎯 DYNAMIC CONFLUENCE"
                 logger.info(
-                    f"🎯 DYNAMIC CONFLUENCE ENTRY: {signal} {symbol} @ {entry_price} "
+                    f"{lane_desc} ENTRY: {signal} {symbol} @ {entry_price} "
                     f"(Diskon: {gap_pct:.2f}% dari harga pasar {current_price}) | Timeout: {timeout_min}m"
                 )
                 if signal == "LONG":
