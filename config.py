@@ -49,12 +49,17 @@ COMBAT_LOOP_INTERVAL = 2.5              # Interval cepat 2.5 detik saat posisi f
 COMBAT_TRIGGER_DRAWDOWN = -0.40         # Masuk mode siaga cepat jika drawdown <= -0.40% harga
 
 # =============================================================================
-# ENTRY RISK GATEKEEPER (Anti-Pucuk & Filter Kualitas Sinyal)
+# ASYMMETRIC LONG & SHORT DYNAMICS & BTC TREND FILTER (VALIDASI HISTORIS OKTOBER)
 # =============================================================================
-MIN_ENTRY_REJECTION_WICK_PERCENT = 8.8      # Ambang batas wick minimal saat pasar Trend (8.8%)
-CHOP_MIN_REJECTION_WICK_PERCENT = 18.0       # Ambang batas wick ketat anti-jebakan saat BTC Sideways/Chop (18.0%)
-WHALE_RESCUE_VOLUME_RATIO = 1.80             # Pintu VIP Paus: Ledakan volume >= 1.80x meloloskan koin juara (XRP)
-SUPER_WICK_RESCUE_RATIO = 50.0               # Pintu VIP Super-Wick: Ekor monster >= 50% (MANA, AVAX, SAGA, JUP, ONE)
+LONG_MAX_RSI = 56.0                             # Anti-Pucuk Overbought: Dilarang LONG jika RSI > 56.0
+SHORT_MIN_RSI = 44.0                            # Anti-Dasar Jurang: Dilarang SHORT jika RSI < 44.0 (anti kegocek di dasar support)
+MIN_ENTRY_REJECTION_WICK_PERCENT = 25.0         # Wick minimal 25% (ekor penolakan nyata, menolak lilin botak)
+CHOP_MIN_REJECTION_WICK_PERCENT = 30.0          # Saat Sideways/Chop, Upper Wick SHORT wajib >= 30% (anti false breakout)
+SHORT_TP1_PERCENT = 0.60                        # TP1 khusus SHORT lebih cepat di +0.60% (kunci cuan anti bounce-back)
+SHORT_SIDEWAYS_FULL_TEBAS = True                # Khusus SHORT di Sideways: Tebas 100% langsung di +0.60% via Market Order!
+BTC_STRICT_ASYMMETRIC_WALL = True               # Dinding Baja BTC: BTC Bearish HARAM LONG, BTC Bullish HARAM SHORT
+WHALE_RESCUE_VOLUME_RATIO = 1.80             # Pintu VIP Paus: Ledakan volume >= 1.80x
+SUPER_WICK_RESCUE_RATIO = 50.0               # Pintu VIP Super-Wick: Ekor monster >= 50%
 SUPER_WICK_MIN_VOL = 0.50                    # Toleransi volume minimum untuk Super-Wick (0.50x)
 MAX_ENTRY_RISK_EMA55_PERCENT = 1.35         # Maksimal jarak harga entry ke support EMA 55 hanya 0.88% (anti resiko tebal, cutloss kecil)
 ANTI_CLIMAX_LOOKBACK_CANDLES = 8            # Pantau 8 candle terakhir (2 jam)

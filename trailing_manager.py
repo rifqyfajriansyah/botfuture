@@ -165,8 +165,12 @@ class TrailingManager:
             logger.debug(f"Gagal hitung ADX {symbol}: {e}")
             return {"adx": 25.0, "plus_di": 20.0, "minus_di": 20.0, "is_choppy": False}
 
-    def get_dynamic_tp_target(self, symbol):
-        """Hitung target partial TP dinamis berdasarkan ATR koin dan regime pasar."""
+    def get_dynamic_tp_target(self, symbol, side=None):
+        """Hitung target partial TP dinamis berdasarkan ATR koin, regime pasar, dan sisi posisi (LONG vs SHORT)."""
+        # Asimetris SHORT: TP1 lebih cepat di +0.60% (anti bounce-back)
+        if side == "short":
+            return getattr(config, "SHORT_TP1_PERCENT", 0.60)
+
         if not getattr(config, "DYNAMIC_TP_ENABLED", True):
             return getattr(config, "PARTIAL_TP_PERCENT", 2.42)
             
@@ -174,7 +178,7 @@ class TrailingManager:
         adx_info = self._get_symbol_adx_info(symbol)
         is_btc_chop = False
         if hasattr(self, "signal_engine") and self.signal_engine:
-            is_btc_chop = getattr(self.signal_engine, "_is_btc_chop", False)
+            is_btc_chop = getattr(self.signal_engine, "_is_btc_chop", False) or (getattr(self.signal_engine, "_cached_btc_bias", "neutral") in ["sideways", "neutral"])
             
         if (adx_info.get("is_choppy", False) or is_btc_chop) and getattr(config, "CHOPPY_AUTO_BEP_ENABLED", True):
             return getattr(config, "CHOPPY_TP1_PERCENT", 0.85)
@@ -201,7 +205,7 @@ class TrailingManager:
         adx_info = self._get_symbol_adx_info(symbol)
         is_btc_chop = False
         if hasattr(self, "signal_engine") and self.signal_engine:
-            is_btc_chop = getattr(self.signal_engine, "_is_btc_chop", False)
+            is_btc_chop = getattr(self.signal_engine, "_is_btc_chop", False) or (getattr(self.signal_engine, "_cached_btc_bias", "neutral") == "sideways")
             
         if (adx_info.get("is_choppy", False) or is_btc_chop) and getattr(config, "CHOPPY_AUTO_BEP_ENABLED", True):
             cp1_min = getattr(config, "CHOPPY_CP1_PERCENT", 0.90)
@@ -308,58 +312,170 @@ class TrailingManager:
                 result["action"] = "stop_triggered"
                 return result
                 
-        # 2a. MID-RANGE PROFIT GUARD (Pengaman Area 0.0% s/d +0.80%)
-        # Koin di bawah +0.50% bebas bernapas. Tapi jika sudah pernah naik >= +0.55% lalu melorot ke BEP (+0.08%), kunci modal!
-        if getattr(config, "MID_RANGE_GUARD_ENABLED", True):
-            highest_so_far = float(pos.get("highest_profit_pct", 0.0))
-            mid_trigger = getattr(config, "MID_RANGE_TRIGGER_PROFIT", 0.55)
-            mid_lock = getattr(config, "MID_RANGE_LOCK_PROFIT", 0.08)
-            
-            if highest_so_far >= mid_trigger and profit_pct <= mid_lock:
-                logger.warning(
-                    f"🛡️ MID-RANGE GUARD TRIGGERED for {symbol}! "
-                    f"Koin sempat naik tinggi ke {highest_so_far:+.2f}%, tapi kehilangan momentum dan melorot ke {profit_pct:+.2f}%. "
-                    f"Menutup posisi di batas BEP aman ({mid_lock:+.2f}%) untuk mengunci modal utuh!"
-                )
-                self.remove_stop(symbol)
-                close_res = self.order_mgr.close_position(
-                    symbol=symbol,
-                    side=side,
-                    amount=pos.get("amount", amount),
-                    reason=f"mid_range_guard ({profit_pct:.2f}%)"
-                )
-                if close_res:
-                    result["action"] = "closed"
-                    result["reason"] = "mid_range_guard"
-                    result["profit_pct"] = profit_pct
-                    return result
-
-        # 2b. CHOPPY STEPPED RATCHET & TEBAS CUAN (Logika Cerdas Disiplin User)
-        # Jika koin dalam mode Choppy (ADX < 22 atau DI misaligned):
-        # Selama Target Cuan Harian 10% Modal belum tercapai:
-        # Kawal ketat mulai dari +0.50% dengan jarak 0.20%!
-        # (Misal peak 0.60% -> kunci 0.40%, peak 0.80% -> kunci 0.60%, dst).
-        # Binance physical stop order langsung digeser naik mengawal koin!
-        if getattr(config, "CHOPPY_AUTO_BEP_ENABLED", True):
-            adx_info = self._get_symbol_adx_info(symbol)
-            is_adx_choppy = adx_info.get("is_choppy", False)
-            
-            p_di = adx_info.get("plus_di", 20.0)
-            m_di = adx_info.get("minus_di", 20.0)
-            if side == "long":
-                di_misaligned = (m_di > p_di * 1.15)
-            else:
-                di_misaligned = (p_di > m_di * 1.15)
-                
-            is_btc_chop = False
-            if hasattr(self, "signal_engine") and self.signal_engine:
+        # -------------------------------------------------------------------------
+        # DETEKSI REGIME PASAR SECARA LIVE: Sideways & Choppy vs Trending
+        # -------------------------------------------------------------------------
+        is_btc_chop = False
+        if hasattr(self, "signal_engine") and self.signal_engine:
+            try:
+                # Panggil _get_btc_bias() agar status BTC selalu fresh (tidak kadaluarsa saat in-position)
+                btc_bias = self.signal_engine._get_btc_bias()
+                is_btc_chop = getattr(self.signal_engine, "_is_btc_chop", False) or (btc_bias == "sideways")
+            except Exception as e:
+                logger.debug(f"Gagal refresh BTC bias di trailing manager: {e}")
                 is_btc_chop = getattr(self.signal_engine, "_is_btc_chop", False)
-                
-            is_choppy_regime = is_btc_chop or is_adx_choppy or di_misaligned
+
+        adx_info = self._get_symbol_adx_info(symbol)
+        is_adx_choppy = adx_info.get("is_choppy", False)
+
+        p_di = adx_info.get("plus_di", 20.0)
+        m_di = adx_info.get("minus_di", 20.0)
+        if side == "long":
+            di_misaligned = (m_di > p_di * 1.15)
+        else:
+            di_misaligned = (p_di > m_di * 1.15)
+
+        is_choppy_regime = is_btc_chop or is_adx_choppy or di_misaligned
+
+        # -------------------------------------------------------------------------
+        # 2a. CHOPPY & SIDEWAYS EXHAUSTION TEBAS ("MENTOK $7 - $11 USD GAKUAT TEBAS")
+        # -------------------------------------------------------------------------
+        # Filosofi Disiplin User:
+        # 1. Khusus saat pasar Choppy/Sideways (BTC Sideways ATAU ADX koin < 22 / lemas):
+        #    - Begitu floating profit menyentuh area target $7 - $11 USD (peak >= +0.50% / ~$7 USD).
+        #    - Jika koin terbukti "GAK KUAT" (melorot >= 0.16% dari peak ATAU ada rejection wick >= 25%):
+        #      -> TEBAS 100% via Market Order! Bungkus cuan tunai langsung!
+        # 2. Di pasar Trending/Gacor (ADX >= 25 & BTC Trending):
+        #    - Koin TIDAK dipotong di $7-$11, dibiarkan lari mengejar TP / Checkpoint Moonbag.
+        # Asimetris SHORT di pasar Choppy / Sideways:
+        # Begitu profit >= +0.60% (sekitar +$4 s/d +$5 USD), tebas 100% instan via market order (kunci cuan anti bounce)!
+        if side == "short" and getattr(config, "SHORT_SIDEWAYS_FULL_TEBAS", True) and is_choppy_regime and profit_pct >= getattr(config, "SHORT_TP1_PERCENT", 0.60):
+            logger.info(
+                f"🎯 ASYMMETRIC SHORT CHOPPY TEBAS TRIGGERED for {symbol}! "
+                f"Profit: +{profit_pct:.2f}% >= +{getattr(config, 'SHORT_TP1_PERCENT', 0.60):.2f}% di pasar Sideways/Chop. "
+                f"Tebas 100% posisi ({amount} {symbol}) via Market Order untuk kunci cuan tunai!"
+            )
+            self.remove_stop(symbol)
+            close_res = self.order_mgr.close_position(
+                symbol=symbol,
+                side=side,
+                amount=pos.get("amount", amount),
+                reason=f"asymmetric_short_tebas_{profit_pct:.2f}%"
+            )
+            if close_res:
+                result["action"] = "closed"
+                result["reason"] = f"asymmetric_short_tebas_{profit_pct:.2f}%"
+                result["profit_pct"] = profit_pct
+                return result
+
+        if getattr(config, "CHOPPY_SIDEWAYS_TEBAS_ENABLED", True) and is_choppy_regime:
+            highest_so_far = float(pos.get("highest_profit_pct") or 0.0)
             
-            if is_choppy_regime:
+            if entry_price > 0 and amount > 0:
+                current_pnl_usd = (current_price - entry_price) * amount if side == "long" else (entry_price - current_price) * amount
+                highest_pnl_usd = (highest_so_far / 100.0) * entry_price * amount
+            else:
+                current_pnl_usd = 0.0
+                highest_pnl_usd = 0.0
+            
+            min_peak_pct = getattr(config, "CHOPPY_TEBAS_MIN_PEAK_PERCENT", 0.50)
+            mature_thresh_pct = getattr(config, "CHOPPY_TEBAS_MATURE_PERCENT", 1.10)
+            min_exit_usd = getattr(config, "CHOPPY_TEBAS_MIN_EXIT_PROFIT_USD", 4.0)
+            
+            hit_target_zone = (highest_so_far >= min_peak_pct)
+            
+            if hit_target_zone and (current_pnl_usd >= min_exit_usd or profit_pct >= 0.12):
+                pullback_from_peak = highest_so_far - profit_pct
+                
+                # Tentukan threshold dinamis berdasarkan kematangan koin
+                if highest_so_far < mature_thresh_pct:
+                    # Fase 1: Ruang Napas Awal (+0.50% s/d +1.10%) -> Longgar & Anti Prematur
+                    cur_max_pullback = getattr(config, "CHOPPY_TEBAS_EARLY_PULLBACK", 0.24)
+                    cur_wick_thresh = getattr(config, "CHOPPY_TEBAS_EARLY_WICK", 38.0)
+                else:
+                    # Fase 2: Pucuk Matang Disiplin (>= +1.10%) -> Kunci Profit Tertinggi
+                    cur_max_pullback = getattr(config, "CHOPPY_TEBAS_MATURE_PULLBACK", 0.18)
+                    cur_wick_thresh = getattr(config, "CHOPPY_TEBAS_MATURE_WICK", 26.0)
+                
+                # Cek Rejection Wick & Volume Climax pada lilin 15m
+                has_rejection_wick = False
+                is_volume_climax_dump = False
+                wick_pct = 0.0
+                vol_ratio = 1.0
+                
+                try:
+                    tf = getattr(config, "TRADING_TIMEFRAME", "15m")
+                    candles = self.order_mgr.exchange.fetch_ohlcv(symbol, tf, limit=10)
+                    if candles and len(candles) >= 2:
+                        l_c = candles[-1]
+                        o_p, h_p, l_p, c_p, v_p = float(l_c[1]), float(l_c[2]), float(l_c[3]), float(l_c[4]), float(l_c[5])
+                        c_range = h_p - l_p
+                        c_range_pct = (c_range / entry_price * 100.0) if entry_price > 0 else 0.0
+                        
+                        # Hitung volume ratio terhadap lilin-lilin sebelumnya
+                        prior_vols = [float(c[5]) for c in candles[:-1]]
+                        avg_vol = (sum(prior_vols) / len(prior_vols)) if prior_vols else v_p
+                        vol_ratio = (v_p / avg_vol) if avg_vol > 0 else 1.0
+                        
+                        if c_range > 0:
+                            if side == "long":
+                                wick_pct = (h_p - max(o_p, c_p)) / c_range * 100.0
+                            else:
+                                wick_pct = (min(o_p, c_p) - l_p) / c_range * 100.0
+                                
+                            # Cek Whale Climax Dump (Volume Spike >= 1.6x + Wick >= 24%)
+                            climax_vol_ratio = getattr(config, "CHOPPY_TEBAS_CLIMAX_VOL_RATIO", 1.6)
+                            climax_wick_thresh = getattr(config, "CHOPPY_TEBAS_CLIMAX_WICK", 24.0)
+                            if vol_ratio >= climax_vol_ratio and wick_pct >= climax_wick_thresh and c_range_pct >= 0.20:
+                                is_volume_climax_dump = True
+                            
+                            # Filter Anti-Doji Lilin Tipis (< 0.20% diabaikan)
+                            min_candle_range = getattr(config, "CHOPPY_TEBAS_MIN_CANDLE_RANGE", 0.20)
+                            if wick_pct >= cur_wick_thresh and c_range_pct >= min_candle_range:
+                                has_rejection_wick = True
+                except Exception as e:
+                    logger.debug(f"Error checking rejection wick/vol for choppy tebas: {e}")
+                    
+                is_gakuat = (pullback_from_peak >= cur_max_pullback) or has_rejection_wick or is_volume_climax_dump
+                
+                if is_gakuat:
+                    if is_volume_climax_dump:
+                        reason_desc = f"climax_vol_{vol_ratio:.1f}x_wick_{wick_pct:.1f}%"
+                    elif pullback_from_peak >= cur_max_pullback:
+                        reason_desc = f"pullback_{pullback_from_peak:.2f}%"
+                    else:
+                        reason_desc = f"wick_{wick_pct:.1f}%"
+                        
+                    regime_desc = "BTC_CHOP" if is_btc_chop else ("ADX_CHOP" if is_adx_choppy else "DI_MISALIGNED")
+                    phase_desc = "MATURE_PUCUK" if highest_so_far >= mature_thresh_pct else "EARLY_PULLBACK"
+                    logger.info(
+                        f"🛑 CHOPPY/SIDEWAYS TEBAS TRIGGERED for {symbol}! "
+                        f"Regime: {regime_desc} | Phase: {phase_desc} | Peak: +${highest_pnl_usd:.2f} (+{highest_so_far:.2f}%) ➔ Now: +${current_pnl_usd:.2f} (+{profit_pct:.2f}%). "
+                        f"Koin terbukti GAK KUAT ({reason_desc})! "
+                        f"TEBAS 100% amankan profit tunai sekarang juga!"
+                    )
+                    self.remove_stop(symbol)
+                    close_res = self.order_mgr.close_position(
+                        symbol=symbol,
+                        side=side,
+                        amount=pos.get("amount", amount),
+                        reason=f"choppy_sideways_tebas_{reason_desc}"
+                    )
+                    if close_res:
+                        result["action"] = "closed"
+                        result["reason"] = f"choppy_sideways_tebas_{reason_desc}"
+                        result["profit_pct"] = profit_pct
+                        return result
+
+        # -------------------------------------------------------------------------
+        # 2b. UNIVERSAL PROFIT GUARD (BERLAKU UNTUK SEMUA REGIME)
+        # -------------------------------------------------------------------------
+        # Filosofi Mutlak: HARAM hukumnya trade yang sudah cuan +0.50% s/d +0.70%+ (+11 USD) berbalik jadi minus!
+        auto_bep_enabled = getattr(config, "CHOPPY_AUTO_BEP_ENABLED", True)
+        
+        if auto_bep_enabled:
                 # 1. PENGAMAN BEP MURNI BERNAFAS (Aktif di +0.50% -> Kunci +0.08% cover fee)
-                # Filosofi: Modal 100% aman, tetapi memberi ruang napas longgar agar tidak tercekik di pucuk bawah!
+                # Modal 100% aman, memberi ruang napas longgar agar tidak tercekik di pucuk bawah!
                 bep_trigger = getattr(config, "CHOPPY_BEP_TRIGGER_PERCENT", 0.50)
                 bep_lock = getattr(config, "CHOPPY_BEP_LOCK_PERCENT", 0.08)
                 if profit_pct >= bep_trigger and not pos.get("choppy_bep_locked", False):
@@ -387,12 +503,12 @@ class TrailingManager:
                                 pos["choppy_ratchet_locked_pct"] = bep_lock
                                 self.state.save()
                                 logger.info(
-                                    f"🛡️ CHOPPY BEP BREATHING ROOM ACTIVATED for {symbol}! "
+                                    f"🛡️ UNIVERSAL BEP LOCK ACTIVATED for {symbol}! "
                                     f"Profit: +{profit_pct:.2f}% >= +{bep_trigger}% | "
                                     f"Physical Stop Locked @ {bep_stop_price} (+{bep_lock}% cover fee). MODAL 100% AMAN BEBAS RESIKO!"
                                 )
 
-                # 2. STEPPED RATCHET CHOPPY (Kawal ketat profit di pasar choppy mulai +0.70%)
+                # 2. STEPPED RATCHET (Kawal ketat profit mulai +0.50% s/d +0.70%)
                 daily_pnl = self.state.get_daily_pnl()
                 equity_fn = getattr(self.order_mgr, "get_total_equity", None) or getattr(self.order_mgr, "get_available_balance", None)
                 cur_eq = equity_fn() if equity_fn else None
@@ -401,9 +517,8 @@ class TrailingManager:
                 else:
                     daily_target_usd = round((cur_eq or 150.0) * (getattr(config, "DAILY_TARGET_PROFIT_PERCENT", 10.0) / 100.0), 2)
                 
-                # Mode stepped ratchet selalu aktif di pasar choppy untuk mengamankan cuan
-                ratchet_trigger = getattr(config, "CHOPPY_RATCHET_TRIGGER_PERCENT", 0.70)
-                ratchet_trail = getattr(config, "CHOPPY_RATCHET_TRAIL_PERCENT", 0.45)
+                ratchet_trigger = getattr(config, "CHOPPY_RATCHET_TRIGGER_PERCENT", 0.50)
+                ratchet_trail = getattr(config, "CHOPPY_RATCHET_TRAIL_PERCENT", 0.22) if is_choppy_regime else 0.30
                 highest_p = max(pos.get("highest_profit_pct", 0.0), profit_pct)
                 
                 if highest_p >= ratchet_trigger:
@@ -418,7 +533,7 @@ class TrailingManager:
                     if highest_p >= 1.80:
                         desired_lock_pct = max(desired_lock_pct, 1.00)
                         
-                    current_locked_pct = float(pos.get("choppy_ratchet_locked_pct", 0.0))
+                    current_locked_pct = float(pos.get("choppy_ratchet_locked_pct") or 0.0)
                     
                     # Kerek stop order naik jika level baru lebih tinggi minimal 0.04%
                     if desired_lock_pct > current_locked_pct + 0.04:
@@ -451,7 +566,28 @@ class TrailingManager:
                                 )
                         else:
                             # Jika harga pasar saat ini sudah terlanjur di bawah ratchet stop,
-                            # tandai level agar tidak looping spam, pertahankan stop aman yang aktif
+                            # coba pasang stop pengaman di level BEP cover fee (+0.12%) jika harga masih di atas BEP
+                            fallback_lock_pct = 0.12
+                            fallback_stop_price = self.calculate_stop_price(entry_price, fallback_lock_pct, side)
+                            is_fallback_valid = (current_price > fallback_stop_price) if side == "long" else (current_price < fallback_stop_price)
+                            
+                            if is_fallback_valid and (not old_stop or not old_stop.get("order_id")):
+                                new_stop = self.order_mgr.place_stop_order(
+                                    symbol=symbol,
+                                    side=side,
+                                    amount=pos.get("amount", amount),
+                                    stop_price=fallback_stop_price
+                                )
+                                if new_stop:
+                                    self.state.set_trailing_stop(
+                                        stop_order_id=new_stop["id"],
+                                        stop_price=fallback_stop_price,
+                                        checkpoint_level=fallback_lock_pct
+                                    )
+                                    pos["choppy_bep_locked"] = True
+                                    logger.info(
+                                        f"🛡️ Ratchet slipped from peak, fallback BEP Stop locked @ {fallback_stop_price} (+{fallback_lock_pct}%) for {symbol}."
+                                    )
                             pos["choppy_ratchet_locked_pct"] = desired_lock_pct
                             self.state.save()
                             logger.warning(
@@ -460,8 +596,8 @@ class TrailingManager:
                             )
 
         if getattr(config, "PARTIAL_TP_ENABLED", True) and not pos.get("partial_tp_done", False):
-            # Target TP Dinamis Adaptif ATR koin
-            tp_target_pct = self.get_dynamic_tp_target(symbol)
+            # Target TP Dinamis Adaptif ATR koin & Asimetris Sisi (LONG vs SHORT)
+            tp_target_pct = self.get_dynamic_tp_target(symbol, side=side)
             hit_main_target = profit_pct >= tp_target_pct
             
             # Cek Stall Guard ("Bensin Habis di Tengah Jalan")
@@ -613,7 +749,7 @@ class TrailingManager:
                         else:
                             bep_pct = 0.22  # BEP murni cover fee
                         # JANGAN PERNAH DOWNGRADE: Jika ratchet sudah mengunci level lebih tinggi, pertahankan level tertinggi!
-                        bep_pct = max(bep_pct, float(pos.get("choppy_ratchet_locked_pct", 0.0)))
+                        bep_pct = max(bep_pct, float(pos.get("choppy_ratchet_locked_pct") or 0.0))
                         bep_stop_price = self.calculate_stop_price(entry_price, bep_pct, side)
                         
                         if old_stop and old_stop.get("order_id"):

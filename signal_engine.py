@@ -335,12 +335,12 @@ class SignalEngine:
         prev_range = prev["high"] - prev["low"]
         prev_lower_wick = (min(prev["open"], prev["close"]) - prev["low"]) / prev_range if prev_range > 0 else 0.0
         # Smart Adaptive Rejection Wick:
-        # Wajib wick tebal minimal >= 18.0% di pasar chop, atau 8.8% di pasar trend
+        # Asimetris: Minimal 25% wick ekor penolakan nyata, menolak lilin tipis tanpa ekor
         is_chop = getattr(self, "_is_btc_chop", False) or (getattr(self, "_cached_btc_bias", "neutral") == "sideways")
-        min_wick_ratio = getattr(config, "CHOP_MIN_REJECTION_WICK_PERCENT" if is_chop else "MIN_ENTRY_REJECTION_WICK_PERCENT", 8.8) / 100.0
+        min_wick_ratio = getattr(config, "MIN_ENTRY_REJECTION_WICK_PERCENT", 25.0) / 100.0
         
-        # Pintu Penyelamat VIP (Additive Rescue Doors):
-        is_whale = vol_ratio >= getattr(config, "WHALE_RESCUE_VOLUME_RATIO", 1.80)
+        # Pintu Penyelamat VIP (Hanya jika wick minimal 20%):
+        is_whale = vol_ratio >= getattr(config, "WHALE_RESCUE_VOLUME_RATIO", 1.80) and (lower_wick_ratio >= 0.20)
         is_super_wick = lower_wick_ratio >= (getattr(config, "SUPER_WICK_RESCUE_RATIO", 50.0) / 100.0)
         has_valid_wick = (lower_wick_ratio >= min_wick_ratio and is_green_candle) or (lower_wick_ratio >= 0.35) or is_whale or is_super_wick
             
@@ -351,9 +351,10 @@ class SignalEngine:
         if last["close"] < ema_21 * 0.998:
             return False, 0, {"reason": "close_below_ema21"}
             
-        # 7. RSI Sweet Spot (40 s/d 65): punya ruang untuk naik kencang
-        if rsi < 40 or rsi > 68:
-            return False, 0, {"reason": f"rsi_out_of_sweet_spot_{rsi:.1f}"}
+        # 7. RSI Sweet Spot (40 s/d 56): punya ruang untuk naik kencang, anti-pucuk overbought
+        max_long_rsi = getattr(config, "LONG_MAX_RSI", 56.0)
+        if rsi < 40 or rsi > max_long_rsi:
+            return False, 0, {"reason": f"rsi_out_of_sweet_spot_{rsi:.1f}_max_{max_long_rsi}"}
             
         # 8. Volume Validation (di pasar CHOP wajib >= 1.0x, kecuali Super Wick toleransi >= 0.50x)
         vol_ratio = vol / vol_sma if vol_sma > 0 else 1.0
@@ -446,12 +447,12 @@ class SignalEngine:
         prev_range = prev["high"] - prev["low"]
         prev_upper_wick = (prev["high"] - max(prev["open"], prev["close"])) / prev_range if prev_range > 0 else 0.0
         # Smart Adaptive Rejection Wick:
-        # Wajib wick tebal minimal >= 18.0% di pasar chop, atau 8.8% di pasar trend
-        is_chop = getattr(self, "_is_btc_chop", False) or (getattr(self, "_cached_btc_bias", "neutral") == "sideways")
-        min_wick_ratio = getattr(config, "CHOP_MIN_REJECTION_WICK_PERCENT" if is_chop else "MIN_ENTRY_REJECTION_WICK_PERCENT", 8.8) / 100.0
+        # Asimetris SHORT: Di Sideways/Neutral wajib wick >= 30% (anti false breakdown), di Trend minimal 25%
+        is_chop = getattr(self, "_is_btc_chop", False) or (getattr(self, "_cached_btc_bias", "neutral") in ["sideways", "neutral"])
+        min_wick_ratio = getattr(config, "CHOP_MIN_REJECTION_WICK_PERCENT" if is_chop else "MIN_ENTRY_REJECTION_WICK_PERCENT", 25.0) / 100.0
         
-        # Pintu Penyelamat VIP (Additive Rescue Doors):
-        is_whale = vol_ratio >= getattr(config, "WHALE_RESCUE_VOLUME_RATIO", 1.80)
+        # Pintu Penyelamat VIP (Hanya jika wick minimal 20%):
+        is_whale = vol_ratio >= getattr(config, "WHALE_RESCUE_VOLUME_RATIO", 1.80) and (upper_wick_ratio >= 0.20)
         is_super_wick = upper_wick_ratio >= (getattr(config, "SUPER_WICK_RESCUE_RATIO", 50.0) / 100.0)
         has_valid_wick = (upper_wick_ratio >= min_wick_ratio and is_red_candle) or (upper_wick_ratio >= 0.35) or is_whale or is_super_wick
             
@@ -462,9 +463,11 @@ class SignalEngine:
         if last["close"] > ema_21 * 1.002:
             return False, 0, {"reason": "close_above_ema21"}
             
-        # 7. RSI Sweet Spot (32 s/d 60): punya ruang untuk dump
-        if rsi < 32 or rsi > 60:
-            return False, 0, {"reason": f"rsi_out_of_sweet_spot_{rsi:.1f}"}
+        # 7. RSI Sweet Spot (44 s/d 60): punya ruang untuk dump, anti-dasar jurang oversold
+        # Khusus di pasar Sideways/Neutral rawan squeeze: wajib RSI >= 46
+        min_short_rsi = 46.0 if is_chop else getattr(config, "SHORT_MIN_RSI", 44.0)
+        if rsi < min_short_rsi or rsi > 60:
+            return False, 0, {"reason": f"rsi_out_of_sweet_spot_{rsi:.1f}_min_{min_short_rsi}"}
             
         # 8. Volume Validation (di pasar CHOP wajib >= 1.0x, kecuali Super Wick toleransi >= 0.50x)
         vol_ratio = vol / vol_sma if vol_sma > 0 else 1.0
@@ -602,16 +605,23 @@ class SignalEngine:
                         if can_short and btc_rsi_15m >= chop_min_short_rsi:
                             logger.info(f"🚫 SHORT {symbol} diblokir [Adaptive Chop Gate]: BTC Sideways & RSI 15m ({btc_rsi_15m:.1f} >= {chop_min_short_rsi:.1f}) sedang memantul naik!")
                             can_short = False
-                    # 4. Saat BTC 1H Bearish tapi TIDAK sedang Flash Dump (15m tenang):
-                    # Izinkan LONG HANYA jika koin ini tren 1H-nya murni BULLISH (Koin kuat decoupling seperti PEPE/XRP)
-                    elif btc_bias == "bearish" and can_long and macro_trend != "bullish":
-                        logger.info(f"🚫 LONG {symbol} diblokir: BTC Bearish & HTF 1H koin ini ({macro_trend}) bukan Bullish murni")
-                        can_long = False
-                    # 5. Kebalikannya saat BTC 1H Bullish tapi TIDAK sedang Flash Pump (15m tenang):
-                    # Izinkan SHORT HANYA jika koin ini tren 1H-nya murni BEARISH (Koin lemah decoupling)
-                    elif btc_bias == "bullish" and can_short and macro_trend != "bearish":
-                        logger.info(f"🚫 SHORT {symbol} diblokir: BTC Bullish & HTF 1H koin ini ({macro_trend}) bukan Bearish murni")
-                        can_short = False
+                    # 2. Dinding Baja BTC Asimetris:
+                    if getattr(config, "BTC_STRICT_ASYMMETRIC_WALL", True):
+                        if btc_bias == "bearish" and can_long:
+                            logger.info(f"🚫 LONG {symbol} diblokir oleh Dinding Baja BTC: BTC Sedang BEARISH! (Haram lawan arus nakhoda pasar)")
+                            can_long = False
+                        elif btc_bias == "bullish" and can_short:
+                            logger.info(f"🚫 SHORT {symbol} diblokir oleh Dinding Baja BTC: BTC Sedang BULLISH! (Haram short di pasar bull)")
+                            can_short = False
+                    else:
+                        # 4. Saat BTC 1H Bearish tapi TIDAK sedang Flash Dump (15m tenang):
+                        if btc_bias == "bearish" and can_long and macro_trend != "bullish":
+                            logger.info(f"🚫 LONG {symbol} diblokir: BTC Bearish & HTF 1H koin ini ({macro_trend}) bukan Bullish murni")
+                            can_long = False
+                        # 5. Kebalikannya saat BTC 1H Bullish tapi TIDAK sedang Flash Pump (15m tenang):
+                        elif btc_bias == "bullish" and can_short and macro_trend != "bearish":
+                            logger.info(f"🚫 SHORT {symbol} diblokir: BTC Bullish & HTF 1H koin ini ({macro_trend}) bukan Bearish murni")
+                            can_short = False
                 else:
                     # Strict Mode (Legacy kaku)
                     if btc_bias == "bearish" and can_long:
