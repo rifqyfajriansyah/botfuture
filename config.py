@@ -148,10 +148,10 @@ PARTIAL_TP_PERCENT = 2.42            # Fallback statis jika data ATR tidak terse
 # 2. FLEXIBLE TRAILING PROFIT RATCHET (Tangga Pengawalan Adaptif)
 DYNAMIC_TRAILING_ENABLED = True
 TRAILING_FIRST_CHECKPOINT_ATR_RATIO = 1.4  # Checkpoint 1 aktif lebih cepat (1.4x ATR koin)
-TRAILING_FIRST_CHECKPOINT_MIN_PERCENT = 1.30 # Minimal Checkpoint 1 aktif di +1.30%
-TRAILING_FIRST_CHECKPOINT_MAX_PERCENT = 1.65 # PLAFON MAKSIMAL: Koin seliar apapun WAJIB aktif di +1.65%!
+TRAILING_FIRST_CHECKPOINT_MIN_PERCENT = 0.85 # Checkpoint 1 aktif di +0.85% (Lantai Anti-BEP tebas cuan aman ~$10 USD!)
+TRAILING_FIRST_CHECKPOINT_MAX_PERCENT = 1.10 # Plafon maksimal CP1 aktif paling lambat di +1.10%
 TRAILING_FIRST_STOP_ATR_RATIO = 0.80       # Kunci stop loss pertama di 0.80x ATR
-TRAILING_FIRST_STOP_MIN_PERCENT = 0.65     # Minimal stop loss terkunci di +0.65%
+TRAILING_FIRST_STOP_MIN_PERCENT = 0.65     # Minimal stop loss terkunci di +0.65% (Duit masuk kantong!)
 TRAILING_FIRST_STOP_MAX_PERCENT = 0.90     # Plafon stop 1 di +0.90%
 TRAILING_STOP_OFFSET_ATR_RATIO = 0.80      # Jarak kawal stop 0.80x ATR koin (ruang napas lega)
 TRAILING_STOP_OFFSET_MIN = 0.65            # Minimal jarak stop 0.65% (anti kejilat spread)
