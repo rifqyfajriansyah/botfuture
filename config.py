@@ -21,7 +21,7 @@ TRADING_MODE = os.getenv("TRADING_MODE", "testnet")  # 'live' atau 'testnet'
 # =============================================================================
 LEVERAGE = 3                    # Leverage 3x (Aman & terkontrol)
 MARGIN_MODE = "isolated"        # Isolated margin (lebih aman per posisi)
-BALANCE_USAGE = 0.65            # Gunakan 65% balance (~$850 notional di saldo $436, porsi sehat & anti over-leverage)
+BALANCE_USAGE = 0.95            # Gunakan 95% balance (Maksimalisasi compounding & capital efficiency sesuai arahan user)
 MAX_POSITIONS = 1               # Hanya 1 posisi aktif
 # =============================================================================
 # CAPITAL FLOOR GUARD (PENGAMAN MODAL POKOK 5 JUTA RUPIAH)
