@@ -378,9 +378,13 @@ class SignalEngine:
         if vol_ratio >= 1.2:
             score += 5
             
+        upper_wick = last["high"] - max(last["open"], last["close"])
+        upper_wick_ratio = upper_wick / candle_range if candle_range > 0 else 0.0
+            
         details = {
             "setup": "TPLR_LONG",
             "lower_wick_pct": f"{lower_wick_ratio*100:.1f}%",
+            "upper_wick_pct": f"{upper_wick_ratio*100:.1f}%",
             "rsi": round(rsi, 1),
             "vol_ratio": f"{vol_ratio:.2f}x",
             "dist_ema": f"{distance_to_ema:+.2f}%",
@@ -490,15 +494,42 @@ class SignalEngine:
         if vol_ratio >= 1.2:
             score += 5
             
+        lower_wick = min(last["open"], last["close"]) - last["low"]
+        lower_wick_ratio = lower_wick / candle_range if candle_range > 0 else 0.0
+
         details = {
             "setup": "TPLR_SHORT",
             "upper_wick_pct": f"{upper_wick_ratio*100:.1f}%",
+            "lower_wick_pct": f"{lower_wick_ratio*100:.1f}%",
             "rsi": round(rsi, 1),
             "vol_ratio": f"{vol_ratio:.2f}x",
             "dist_ema": f"{distance_to_ema:+.2f}%",
             "risk_ema55": f"{dist_to_ema55:.2f}%",
         }
         return True, min(100, score), details
+
+    def _check_micro_selling_pressure(self, symbol, side="long"):
+        """
+        Cek apakah ada tekanan jual/beli live pada timeframe 1m (Micro-Pressure Check):
+        - Untuk LONG: Apakah lilin 1m terakhir merah (seller aktif) atau ada dump?
+        - Untuk SHORT: Apakah lilin 1m terakhir hijau (buyer aktif) atau ada pump?
+        Returns:
+            bool: True jika ada tekanan berlawanan arah
+        """
+        if not getattr(config, "CHECK_MICRO_1M_PRESSURE", True):
+            return False
+        try:
+            candles_1m = self.fetch_candles(symbol, "1m", limit=3)
+            if candles_1m.empty or len(candles_1m) < 2:
+                return False
+            last_1m = candles_1m.iloc[-1]
+            if side == "long":
+                return bool(last_1m["close"] < last_1m["open"])
+            else:
+                return bool(last_1m["close"] > last_1m["open"])
+        except Exception as e:
+            logger.debug(f"Error checking micro 1m pressure for {symbol}: {e}")
+            return False
 
     def analyze(self, symbol):
         """
@@ -740,6 +771,11 @@ class SignalEngine:
                             except Exception:
                                 wick_r_long = 0.0
 
+                            try:
+                                opp_wick_long = float(str(details_long.get("upper_wick_pct", "0.0")).replace("%", ""))
+                            except Exception:
+                                opp_wick_long = 0.0
+
                             # Kriteria Fast-Fill Roket (Anti Ketinggalan Kereta):
                             # 1. Jalur Volume Breakout: Score >= 85 & Volume Spike >= 1.50x
                             # 2. Jalur Confluence Rejection: Score >= 85 & Lower Wick >= 30% (mantul kokoh dari support)
@@ -751,7 +787,34 @@ class SignalEngine:
                             is_wick_rocket = (wick_r_long >= min_rocket_wick)
 
                             is_rocket_long = (score_long >= min_rocket_score) and (is_vol_rocket or is_wick_rocket)
-                            if is_rocket_long:
+
+                            # DETEKSI TEKANAN JUAL DI PUCUK (ADAPTIVE PRESSURE BIDDING - SWEET SPOT 0.35%):
+                            has_selling_pressure = False
+                            is_micro_dump = False
+                            if getattr(config, "ADAPTIVE_PRESSURE_ENTRY_ENABLED", True):
+                                opp_threshold = getattr(config, "PRESSURE_OPPOSING_WICK_THRESHOLD", 20.0)
+                                is_micro_dump = self._check_micro_selling_pressure(symbol, side="long")
+                                if opp_wick_long >= opp_threshold or is_micro_dump or is_macro_adverse_long:
+                                    has_selling_pressure = True
+
+                            if has_selling_pressure:
+                                # ADA TEKANAN JUAL: BATALKAN FAST-FILL ROKET & TAWAR DI SWEET SPOT 0.35%!
+                                is_rocket_long = False
+                                ext_threshold = getattr(config, "PRESSURE_EXTREME_WICK_THRESHOLD", 35.0)
+                                if opp_wick_long >= ext_threshold:
+                                    disc_pct = getattr(config, "PRESSURE_EXTREME_OFFSET_PERCENT", 0.45)
+                                else:
+                                    disc_pct = getattr(config, "PRESSURE_SWEET_SPOT_OFFSET_PERCENT", 0.35)
+
+                                suggested_entry = current_close * (1.0 - (disc_pct / 100.0))
+                                result["suggested_entry_price"] = suggested_entry
+                                result["is_rocket"] = False
+                                logger.info(
+                                    f"🛡️ ADAPTIVE BID (TEKANAN JUAL TERDETEKSI) for {symbol}: "
+                                    f"Upper Wick {opp_wick_long:.1f}%, 1m Red: {is_micro_dump}, Macro Dump: {is_macro_adverse_long} "
+                                    f"-> Tawar Murah di Lembah @ {suggested_entry:.6f} (Diskon: {disc_pct:.2f}%)!"
+                                )
+                            elif is_rocket_long:
                                 micro_offset = getattr(config, "ROCKET_ENTRY_OFFSET_PERCENT", 0.05) / 100.0
                                 suggested_entry = current_close * (1.0 - micro_offset)
                                 result["suggested_entry_price"] = suggested_entry
@@ -845,6 +908,11 @@ class SignalEngine:
                             except Exception:
                                 wick_r_short = 0.0
 
+                            try:
+                                opp_wick_short = float(str(details_short.get("lower_wick_pct", "0.0")).replace("%", ""))
+                            except Exception:
+                                opp_wick_short = 0.0
+
                             min_rocket_score = getattr(config, "ROCKET_MIN_SCORE", 85)
                             min_rocket_vol = getattr(config, "ROCKET_MIN_VOL_RATIO", 1.50)
                             min_rocket_wick = getattr(config, "ROCKET_MIN_WICK_PERCENT", 30.0)
@@ -853,7 +921,34 @@ class SignalEngine:
                             is_wick_rocket = (wick_r_short >= min_rocket_wick)
 
                             is_rocket_short = (score_short >= min_rocket_score) and (is_vol_rocket or is_wick_rocket)
-                            if is_rocket_short:
+
+                            # DETEKSI TEKANAN BELI DI DASAR (ADAPTIVE PRESSURE ASKING - SWEET SPOT +0.35%):
+                            has_buying_pressure = False
+                            is_micro_pump = False
+                            if getattr(config, "ADAPTIVE_PRESSURE_ENTRY_ENABLED", True):
+                                opp_threshold = getattr(config, "PRESSURE_OPPOSING_WICK_THRESHOLD", 20.0)
+                                is_micro_pump = self._check_micro_selling_pressure(symbol, side="short")
+                                if opp_wick_short >= opp_threshold or is_micro_pump or is_macro_adverse_short:
+                                    has_buying_pressure = True
+
+                            if has_buying_pressure:
+                                # ADA TEKANAN BELI: BATALKAN FAST-FILL ROKET & JUAL MAHAL DI SWEET SPOT +0.35%!
+                                is_rocket_short = False
+                                ext_threshold = getattr(config, "PRESSURE_EXTREME_WICK_THRESHOLD", 35.0)
+                                if opp_wick_short >= ext_threshold:
+                                    prem_pct = getattr(config, "PRESSURE_EXTREME_OFFSET_PERCENT", 0.45)
+                                else:
+                                    prem_pct = getattr(config, "PRESSURE_SWEET_SPOT_OFFSET_PERCENT", 0.35)
+
+                                suggested_entry = current_close * (1.0 + (prem_pct / 100.0))
+                                result["suggested_entry_price"] = suggested_entry
+                                result["is_rocket"] = False
+                                logger.info(
+                                    f"🛡️ ADAPTIVE ASK (TEKANAN BELI TERDETEKSI) for {symbol}: "
+                                    f"Lower Wick {opp_wick_short:.1f}%, 1m Green: {is_micro_pump}, Macro Pump: {is_macro_adverse_short} "
+                                    f"-> Jual Mahal di Pucuk @ {suggested_entry:.6f} (Premium: +{prem_pct:.2f}%)!"
+                                )
+                            elif is_rocket_short:
                                 micro_offset = getattr(config, "ROCKET_ENTRY_OFFSET_PERCENT", 0.05) / 100.0
                                 suggested_entry = current_close * (1.0 + micro_offset)
                                 result["suggested_entry_price"] = suggested_entry

@@ -187,6 +187,21 @@ ROCKET_MIN_WICK_PERCENT = 30.0          # Ekor penolakan kokoh minimal 30% (mant
 ROCKET_ENTRY_OFFSET_PERCENT = 0.05      # Offset mikro sangat tipis (0.05%) agar langsung auto-fill di retest awal
 ROCKET_TIMEOUT_MINUTES = 3              # Timeout cepat 3 menit (koin roket langsung jalan)
 
+# =============================================================================
+# ADAPTIVE PRESSURE BIDDING (SWEET SPOT 0.35% - ANTI TEBASAN PUCUK)
+# =============================================================================
+# Filosofi Disiplin Sniper:
+# Saat sinyal muncul, jika ada indikasi tekanan berlawanan arah (penjual mengguyur di pucuk):
+# - LONG: Ada jarum atas (upper wick) / lilin 1m merah / BTC goyang -> Tawar di diskon sweet spot 0.35%!
+# - SHORT: Ada jarum bawah (lower wick) / lilin 1m hijau / BTC membal -> Jual di premium sweet spot +0.35%!
+# Jika kondisi roket bersih murni tanpa hambatan seller/buyer -> Masuk via Jalur Roket (0.05%) agar tidak ketinggalan!
+ADAPTIVE_PRESSURE_ENTRY_ENABLED = True
+PRESSURE_OPPOSING_WICK_THRESHOLD = 20.0       # Batas ekor lawan (>= 20%) indikasi tekanan seller/buyer
+PRESSURE_SWEET_SPOT_OFFSET_PERCENT = 0.35     # Sweet spot diskon/premium saat ada tekanan (0.35%)
+PRESSURE_EXTREME_WICK_THRESHOLD = 35.0        # Jika ekor lawan sangat panjang (>= 35%), seller ekstra brutal
+PRESSURE_EXTREME_OFFSET_PERCENT = 0.45        # Diskon/premium saat tekanan ekstrem (0.45%)
+CHECK_MICRO_1M_PRESSURE = True                # Cek konfirmasi lilin 1m terakhir
+
 # Jalur Ekstra: Zero-Fill Momentum Chase on Timeout (Dinonaktifkan sesuai instruksi user)
 ZERO_FILL_CHASE_ENABLED = False         # Dinonaktifkan: jika order tawar belum keisi saat timeout, cancel murni tanpa kejar pasar!
 ZERO_FILL_CHASE_MIN_GAIN_PERCENT = 0.08 # Koin sudah mulai bergerak ke arah sinyal minimal +0.08%
