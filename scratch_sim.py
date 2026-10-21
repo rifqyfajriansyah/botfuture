@@ -1,86 +1,111 @@
 import json
+import re
+import glob
+import pandas as pd
+from datetime import datetime, timedelta
 
-with open('/home/ubuntu/binance-bot/bot_state.json') as f:
-    state = json.load(f)
+with open("/home/ubuntu/binance-bot/bot_state.json") as f:
+    d = json.load(f)
 
-history = state.get('trade_history', [])
+trades = [t for t in d.get("trade_history", []) if t.get("entry_time", "") >= "2026-10-17"]
 
-categories = {
-    'moonbag_boost': [],
-    'false_bounce_cut': [],
-    'false_macro_cut': [],
-    'normal_win': [],
-    'normal_loss': [],
-    'bep_win': []
-}
+files = sorted(glob.glob("/home/ubuntu/binance-bot/logs/bot_2026-10-*.log"))
+log_content = ""
+for fn in files:
+    with open(fn, encoding="utf-8", errors="ignore") as f:
+        log_content += f.read() + "\n"
 
-total_realized_old = 0
-total_simulated_new = 0
+pattern = re.compile(r"ENTRY SIGNAL: (LONG|SHORT) ([^\n]+)\n\s+Score: (\d+)/100[^\n]*\n\s+HTF Bias[^\n]*\n\s+Details: (\{[^\}]+\})")
 
-for t in history:
-    pnl = float(t.get('pnl', 0))
-    reason = str(t.get('close_reason', ''))
-    sym = t.get('symbol', '').split(':')[0]
-    total_realized_old += pnl
+entry_signals = {}
+for m in pattern.finditer(log_content):
+    side, sym, score, details_str = m.group(1), m.group(2).strip(), m.group(3), m.group(4)
+    start_pos = max(0, m.start() - 250)
+    snippet = log_content[start_pos:m.start()]
+    ts_m = re.findall(r"\[(2026-10-\d\d \d\d:\d\d:\d\d)\]", snippet)
+    if ts_m:
+        ts = ts_m[-1]
+        vol_m = re.search(r"'vol_ratio': '([^']+)x'", details_str)
+        vol_val = float(vol_m.group(1)) if vol_m else 1.0
+        wick_m = re.search(r"'(?:lower|upper)_wick_pct': '([^'%]+)%?'", details_str)
+        wick_val = float(wick_m.group(1)) if wick_m else 0.0
+        entry_signals[(sym, ts[:16])] = {"vol": vol_val, "wick": wick_val, "score": score}
+
+print(f"Total parsed entry signals: {len(entry_signals)}")
+
+enriched_trades = []
+for t in trades:
+    sym = t["symbol"]
+    e_time = t.get("entry_time", "")
+    e_dt = datetime.fromisoformat(e_time) if e_time else None
     
-    if 'stall_guard_full' in reason:
-        if 'AR' in sym:
-            new_pnl = 38.50
-        elif 'RENDER' in sym:
-            new_pnl = 12.50
-        elif 'PENGU' in sym:
-            new_pnl = 9.20
-        elif 'ATOM' in sym:
-            new_pnl = 11.50
-        else:
-            new_pnl = round(pnl * 1.5, 2)
-        categories['moonbag_boost'].append((sym, pnl, new_pnl, 'Moonbag 50% Runner'))
-        total_simulated_new += new_pnl
+    found_sig = None
+    if e_dt:
+        for m_offset in range(-4, 5):
+            check_key = (sym, (e_dt + timedelta(minutes=m_offset)).strftime("%Y-%m-%d %H:%M"))
+            if check_key in entry_signals:
+                found_sig = entry_signals[check_key]
+                break
+    
+    vol = found_sig["vol"] if found_sig else None
+    wick = found_sig["wick"] if found_sig else None
+    
+    enriched_trades.append({
+        "symbol": sym.split("/")[0],
+        "full_sym": sym,
+        "side": t["side"],
+        "entry_time": e_time,
+        "close_time": t.get("close_time", ""),
+        "pnl": t.get("pnl", 0),
+        "hp": t.get("highest_profit_pct", 0),
+        "lp": t.get("lowest_profit_pct", 0),
+        "vol": vol,
+        "wick": wick,
+        "reason": t.get("close_reason", "")[:30]
+    })
 
-    elif 'bounce_failure' in reason:
-        if pnl < -7.0:
-            new_pnl = 9.80
-        elif pnl < -5.0:
-            new_pnl = 1.50
-        else:
-            new_pnl = 4.20
-        categories['false_bounce_cut'].append((sym, pnl, new_pnl, 'Volume Filter Rescued'))
-        total_simulated_new += new_pnl
+df = pd.DataFrame(enriched_trades)
+print(f"Total trades since Saturday: {len(df)}")
+print(f"Trades with volume data matched: {df['vol'].notna().sum()}/{len(df)}")
 
-    elif 'macro_pressure' in reason:
-        new_pnl = 8.50
-        categories['false_macro_cut'].append((sym, pnl, new_pnl, 'Grace Period Protected'))
-        total_simulated_new += new_pnl
+# Analysis 1: Volume correlation
+win_df = df[df["pnl"] > 0]
+loss_df = df[df["pnl"] <= 0]
+print("\n=== 1. ANALISA VOLUME (WINS vs LOSSES) ===")
+print(f"Avg Vol of Winners: {win_df['vol'].mean():.2f}x")
+print(f"Avg Vol of Losers : {loss_df['vol'].mean():.2f}x")
 
-    elif pnl < 0:
-        new_pnl = pnl
-        categories['normal_loss'].append((sym, pnl, new_pnl, 'Legitimate Risk Cut'))
-        total_simulated_new += new_pnl
+# Simulation: What if we blocked trades with vol < 1.05x?
+low_vol = df[df["vol"] < 1.05]
+print(f"\nTrades with Volume < 1.05x: {len(low_vol)}")
+for idx, r in low_vol.iterrows():
+    print(f"  {r['symbol']:<8} | {r['side']:<5} | Vol: {r['vol']}x | PnL: {r['pnl']:+6.2f} | Reason: {r['reason']}")
 
-    else:
-        new_pnl = pnl
-        if pnl > 3.0:
-            categories['normal_win'].append((sym, pnl, new_pnl, 'Clean Winner'))
-        else:
-            categories['bep_win'].append((sym, pnl, new_pnl, 'BEP Scratch'))
-        total_simulated_new += new_pnl
+low_vol_loss = low_vol[low_vol["pnl"] <= 0]["pnl"].sum()
+low_vol_win = low_vol[low_vol["pnl"] > 0]["pnl"].sum()
+print(f"Summary Vol < 1.05x: Wins: +{low_vol_win:.2f} | Losses: {low_vol_loss:.2f} | Net: {low_vol_win + low_vol_loss:.2f} USDT")
 
-print(f"Total trades di database: {len(history)}\n")
-print("=== REKAP 68 TRADES JIKA MENGGUNAKAN ALGORITMA BARU ===\n")
-print(f"1. Koin Moonbag Runner (Stall Guard Upgrade) : {len(categories['moonbag_boost'])} trades")
-for item in categories['moonbag_boost']:
-    print(f"   - {item[0]:<12}: Old {item[1]:+6.2f} -> New {item[2]:+6.2f} USDT ({item[3]})")
+# Analysis 2: Cooldown 4h on losing coins
+print("\n=== 2. ANALISA COOLDOWN 4 JAM PADA KOIN KALAH ===")
+blocked_by_cooldown = []
+last_loss_time = {}
+for idx, r in df.iterrows():
+    sym = r["full_sym"]
+    e_dt = datetime.fromisoformat(r["entry_time"])
+    pnl = r["pnl"]
+    
+    if sym in last_loss_time:
+        diff_hours = (e_dt - last_loss_time[sym]).total_seconds() / 3600.0
+        if diff_hours < 4.0:
+            blocked_by_cooldown.append((r["symbol"], diff_hours, pnl, r["entry_time"]))
+    
+    if pnl < 0:
+        c_dt = datetime.fromisoformat(r["close_time"]) if r["close_time"] else e_dt
+        last_loss_time[sym] = c_dt
 
-print(f"\n2. Koin Terselamatkan Dari False Cut Loss    : {len(categories['false_bounce_cut']) + len(categories['false_macro_cut'])} trades")
-for item in categories['false_bounce_cut'] + categories['false_macro_cut']:
-    print(f"   - {item[0]:<12}: Old {item[1]:+6.2f} -> New {item[2]:+6.2f} USDT ({item[3]})")
-
-print(f"\n3. Normal Win & BEP Tetap Aman               : {len(categories['normal_win']) + len(categories['bep_win'])} trades")
-print(f"4. Valid Cut Loss Tetap Disiplin             : {len(categories['normal_loss'])} trades")
-
-print("\n" + "="*65)
-print(f"TOTAL PROFIT RIIL LAMA (68 Trades) : {total_realized_old:+8.2f} USDT")
-print(f"TOTAL PROFIT DENGAN ALGO BARU      : {total_simulated_new:+8.2f} USDT")
-print(f"SELISIH CUAN TAMBAHAN YANG HILANG  : {total_simulated_new - total_realized_old:+8.2f} USDT")
-print(f"ESTIMASI SALDO SEHARUSNYA          : ${282.77 + (total_simulated_new - total_realized_old):.2f} USDT (Rp {(282.77 + (total_simulated_new - total_realized_old))*16000:,.0f})")
-print("="*65)
+print(f"Trades that would have been BLOCKED by 4h Loss Cooldown: {len(blocked_by_cooldown)}")
+total_saved_by_cooldown = 0
+for b in blocked_by_cooldown:
+    print(f"  {b[0]:<8} entered {b[1]:.1f}h after loss | PnL was: {b[2]:+6.2f} USDT | Time: {b[3][:16]}")
+    total_saved_by_cooldown += b[2]
+print(f"Net PnL impact of 4h Cooldown: {-total_saved_by_cooldown:+6.2f} USDT (Hemat uang)")
