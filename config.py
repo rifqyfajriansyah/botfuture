@@ -33,9 +33,10 @@ MIN_WALLET_BALANCE_USDT = 280.0   # $280 USDT setara Rp 5.000.000 IDR (Kurs ~Rp 
 # =============================================================================
 # COOLDOWN & ANTI-REENTRY SETTINGS
 # =============================================================================
-SIGNAL_COOLDOWN_MINUTES = 10             # Cooldown global 5 menit setelah trade selesai (cepat siap cari peluang baru)
-FIXED_COOLDOWN_ENABLED = True           # Kalah maupun menang delay tetap fixed 5 menit (tidak ada penalti jeda lama)
-SYMBOL_COOLDOWN_MINUTES = 60            # Cooldown khusus koin yang sama jika trade selesai (60 menit anti-revenge koin serupa)
+SIGNAL_COOLDOWN_MINUTES = 10             # Cooldown global 10 menit setelah trade selesai (cepat siap cari peluang baru)
+FIXED_COOLDOWN_ENABLED = True           # Kalah maupun menang delay global tetap fixed 10 menit (tidak ada penalti jeda berjam-jam)
+SYMBOL_COOLDOWN_MINUTES = 45            # Cooldown khusus koin yang sama jika trade MENANG/BEP (45 menit jeda sehat)
+SYMBOL_LOSS_COOLDOWN_MINUTES = 240      # COOLDOWN 4 JAM (240 Menit) jika trade KALAH/CUTLOSS (Kunci anti-revenge koin jebakan)
 TIMEOUT_COOLDOWN_MINUTES = 1            # Cooldown global jika limit order cancel/timeout (hanya 1m sebelum scan koin lain)
 TIMEOUT_SYMBOL_COOLDOWN_MINUTES = 15     # Cooldown khusus simbol jika limit order cancel/timeout (hanya 15m / 1 candle)
 MAX_CONSECUTIVE_LOSSES = 999            # Dinonaktifkan: gas terus tanpa jeda/pause losestreak
@@ -263,11 +264,12 @@ MOONBAG_TARGET_USD = 20.0                    # Target puncak profit satu trade (
 # =============================================================================
 # STAGNATION & TIME-STOP LOSS GUARDS (PENGAMAN KALAH SEMUA REGIME)
 # =============================================================================
-# Lapis 1: Stagnant Early Cut (Koin mandul yang tak pernah naik dan minus)
-STAGNANT_EARLY_CUT_ENABLED = True             # Potong dini koin lemas mandul
-STAGNANT_EARLY_CUT_MINUTES = 35               # Jika sudah berjalan 35 menit (> 2.3 candle 15m, beri ruang retest wajar)
+# Lapis 1: Stagnant Early Cut (Fleksibel Smart Invalidation Cut)
+# =============================================================================
+STAGNANT_EARLY_CUT_ENABLED = True             # Potong dini koin lemas mandul (Fleksibel Smart Cut)
+STAGNANT_EARLY_CUT_MINUTES = 20               # Jika sudah berjalan 20 menit (> 1.3 lilin 15m)
 STAGNANT_EARLY_CUT_MAX_HP = 0.20              # Dan tidak pernah naik sama sekali (highest profit < +0.20%)
-STAGNANT_EARLY_CUT_LOSS_THRESHOLD = -0.55     # Dan floating minus <= -0.55% -> Potong dini koin lemas sebelum kena hard stop -0.75%
+STAGNANT_EARLY_CUT_LOSS_THRESHOLD = -0.58     # Dan floating minus <= -0.58% -> Potong dini koin lemas sebelum kena hard stop -0.75% (rugi mentok ~$7.50 s/d ~$7.80)
 
 # Lapis 2: Absolute Stagnation Time-Stop (> 80 Menit / > 5 Lilin 15m)
 # CATATAN AUDIT 312 TRADES: 39 trade cuan butuh 50-90m (+120 USDT). Dilonggarkan ke 80m

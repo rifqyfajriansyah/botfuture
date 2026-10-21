@@ -224,7 +224,9 @@ class StateManager:
         logger.info(f"🔄 Position cleared. Reason: {reason}, PnL: {pnl:+.2f} USDT")
         
         if start_cooldown:
-            self.set_cooldown(symbol=symbol, reason=f"Position closed ({reason})")
+            is_loss = total_pnl < 0 if "total_pnl" in locals() else (pnl < 0)
+            sym_cooldown = getattr(config, "SYMBOL_LOSS_COOLDOWN_MINUTES", 240) if is_loss else getattr(config, "SYMBOL_COOLDOWN_MINUTES", 45)
+            self.set_cooldown(symbol=symbol, sym_minutes=sym_cooldown, reason=f"Position closed ({reason})")
     
     def get_position(self):
         """Ambil info posisi aktif."""

@@ -122,7 +122,8 @@ class TradingBot:
         
         logger.info(f"  ⚙️  Timeframe: {config.TRADING_TIMEFRAME} (HTF: {config.HIGHER_TIMEFRAME})")
         logger.info(f"  ⚙️  Leverage: {config.LEVERAGE}x | Margin: {config.MARGIN_MODE}")
-        logger.info(f"  ⚙️  Cooldown Global: {config.SIGNAL_COOLDOWN_MINUTES}m | Symbol: {config.SYMBOL_COOLDOWN_MINUTES}m")
+        loss_cd = getattr(config, 'SYMBOL_LOSS_COOLDOWN_MINUTES', 240)
+        logger.info(f"  ⚙️  Cooldown Global: {config.SIGNAL_COOLDOWN_MINUTES}m | Symbol Win: {config.SYMBOL_COOLDOWN_MINUTES}m | Symbol Loss: {loss_cd}m (4 Jam)")
         logger.info(f"  ⚙️  Trailing Ratchet: Checkpoint {config.TRAILING_CHECKPOINT_PERCENT}%, Stop {config.TRAILING_FIRST_STOP_PERCENT}%")
         logger.info(f"  ⚙️  Emergency SL Safety Net: -{config.EMERGENCY_SL_PERCENT}% ({'ON' if config.EMERGENCY_SL_ENABLED else 'OFF'})")
         
