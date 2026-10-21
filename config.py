@@ -52,10 +52,12 @@ COMBAT_TRIGGER_DRAWDOWN = -0.40         # Masuk mode siaga cepat jika drawdown <
 # =============================================================================
 # ASYMMETRIC LONG & SHORT DYNAMICS & BTC TREND FILTER (VALIDASI HISTORIS OKTOBER)
 # =============================================================================
+TRADING_ALLOWED_SIDES = "BOTH"                   # Opsi Arah Trading: "BOTH" (Long & Short terfilter) | "LONG_ONLY" (Fokus Long)
+ALLOW_COUNTER_TREND_SHORT = False                # DILARANG KERAS SHORT lawan arus saat BTC Bullish! (Anti-suicide short squeeze)
 LONG_MAX_RSI = 52.0                             # Anti-Pucuk Sejati: Dilarang LONG jika RSI > 52.0 (wajib beli diskon)
 SHORT_MIN_RSI = 48.0                            # Anti-Dasar Sejati: Dilarang SHORT jika RSI < 48.0 (wajib retest resisten)
 MIN_ENTRY_REJECTION_WICK_PERCENT = 25.0         # Wick minimal 25% (ekor penolakan nyata, menolak lilin botak)
-CHOP_MIN_REJECTION_WICK_PERCENT = 30.0          # Saat Sideways/Chop, Upper Wick SHORT wajib >= 30% (anti false breakout)
+CHOP_MIN_REJECTION_WICK_PERCENT = 35.0          # Saat Sideways/Chop, Upper Wick SHORT wajib >= 35% (ekor penolakan tebal resisten)
 SHORT_TP1_PERCENT = 0.60                        # TP1 khusus SHORT lebih cepat di +0.60% (kunci cuan anti bounce-back)
 SHORT_SIDEWAYS_FULL_TEBAS = True                # Khusus SHORT di Sideways: Tebas 100% langsung di +0.60% via Market Order!
 COUNTER_TREND_ALLOWED = True                     # Boleh trade lawan arah BTC asal TER-CONFIRM
@@ -81,13 +83,13 @@ STRICT_HTF_REQUIRED = True                 # Izinkan koin decoupling yang punya 
 # BTC 1H CHOP / SIDEWAYS REGIME DETECTION (VALIDASI 218 HISTORICAL TRADES: +$168.73 USDT NET GAIN)
 BTC_CHOP_1H_RANGE_MAX = 0.80               # Maksimum rentang lilin 1H BTC (High - Low)/Close (%) untuk Chop Zone
 BTC_CHOP_3H_DISP_MAX = 0.80                # Maksimum perpindahan harga net 3 jam terakhir (%) untuk Chop Zone
-CHOP_MIN_VOLUME_RATIO = 1.00               # Saat BTC Sideways/Chop, altcoin WAJIB punya volume >= 1.0x (validasi Smart Money)
+CHOP_MIN_VOLUME_RATIO = 1.15               # Saat BTC Sideways/Chop, altcoin WAJIB punya volume >= 1.15x (validasi Smart Money nyata)
 
 # ENTRY 2.0 (BTC MICRO-REBOUND & MICRO-SLIP GUARD - ZONA EMAS BACKTEST 0.14%)
 BTC_REBOUND_MAX_15M_PCT = 0.14              # Dilarang SHORT jika lilin 15m BTC sedang memantul naik >= +0.14% (anti keseret pantulan)
 BTC_SLIP_MAX_15M_PCT = 0.14                 # Dilarang LONG jika lilin 15m BTC sedang longsor turun <= -0.14% (anti pisau jatuh)
 BTC_CHOP_MAX_LONG_RSI = 60.0               # [Adaptive Chop Gate] Di pasar Sideways, dilarang LONG jika BTC 15m RSI >= 60.0 (atap resisten kotak)
-BTC_CHOP_MIN_SHORT_RSI = 58.0              # [Adaptive Chop Gate] Di pasar Sideways, dilarang SHORT jika BTC 15m RSI >= 58.0 (BTC sedang memantul naik)
+BTC_CHOP_MIN_SHORT_RSI = 50.0              # [Adaptive Chop Gate] Di pasar Sideways, dilarang SHORT jika BTC 15m RSI >= 50.0 (BTC di separuh atas kotak)
 BTC_MIN_SHORT_RSI = 32.0                    # Dilarang buka SHORT jika RSI 15m BTC < 32 (jenuh jual di dasar support rawan memantul)
 BTC_MAX_LONG_RSI = 80.0                     # Dilarang buka LONG jika RSI 15m BTC >= 80 (jenuh beli ekstrem di pucuk rawan dump kilat, hemat -$33.69 USDT)
 BTC_CHOP_RSI_CRASH_FLOOR = 40.0             # DILARANG KERAS BUKA LONG jika RSI 15m BTC < 40 (pasar dingin/sedang dump parah)

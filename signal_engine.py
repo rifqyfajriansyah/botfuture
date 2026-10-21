@@ -539,6 +539,13 @@ class SignalEngine:
                 can_long = macro_trend in ("bullish", "neutral")
                 can_short = macro_trend in ("bearish", "neutral")
                 
+            # Cek Saklar Arah Trading: BOTH | LONG_ONLY | SHORT_ONLY
+            allowed_sides = getattr(config, "TRADING_ALLOWED_SIDES", "BOTH").upper()
+            if allowed_sides == "LONG_ONLY":
+                can_short = False
+            elif allowed_sides == "SHORT_ONLY":
+                can_long = False
+                
             # Filter BTC Regime: Smart mode (Satpam Anti-Crash) vs Strict mode
             if btc_filter_on and not is_btc:
                 btc_mode = getattr(config, "BTC_FILTER_MODE", "smart")
@@ -613,7 +620,11 @@ class SignalEngine:
                             logger.info(f"🔍 LONG {symbol} (Lawan Arah BTC Bearish): HTF 1H Bullish terdeteksi. Menganalisis 4 Pilar Konfirmasi 15m...")
 
                     elif btc_bias == "bullish" and can_short:
-                        if macro_trend != "bearish":
+                        allow_ct_short = getattr(config, "ALLOW_COUNTER_TREND_SHORT", False)
+                        if not allow_ct_short:
+                            logger.info(f"🚫 SHORT {symbol} diblokir: BTC sedang Bullish, dilarang keras SHORT melawan arus induk pasar!")
+                            can_short = False
+                        elif macro_trend != "bearish":
                             logger.info(f"🚫 SHORT {symbol} diblokir: BTC Bullish & HTF 1H koin ({macro_trend}) bukan Bearish murni (tidak decoupling)")
                             can_short = False
                         else:

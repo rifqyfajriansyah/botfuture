@@ -122,6 +122,9 @@ class TradingBot:
         
         logger.info(f"  ⚙️  Timeframe: {config.TRADING_TIMEFRAME} (HTF: {config.HIGHER_TIMEFRAME})")
         logger.info(f"  ⚙️  Leverage: {config.LEVERAGE}x | Margin: {config.MARGIN_MODE}")
+        sides_mode = getattr(config, 'TRADING_ALLOWED_SIDES', 'BOTH')
+        anti_suicide = "ACTIVE (Blokir Short saat BTC Bullish)" if not getattr(config, 'ALLOW_COUNTER_TREND_SHORT', False) else "OFF"
+        logger.info(f"  ⚙️  Trading Sides: {sides_mode} | Anti-Suicide Short: {anti_suicide}")
         loss_cd = getattr(config, 'SYMBOL_LOSS_COOLDOWN_MINUTES', 240)
         logger.info(f"  ⚙️  Cooldown Global: {config.SIGNAL_COOLDOWN_MINUTES}m | Symbol Win: {config.SYMBOL_COOLDOWN_MINUTES}m | Symbol Loss: {loss_cd}m (4 Jam)")
         logger.info(f"  ⚙️  Trailing Ratchet: Checkpoint {config.TRAILING_CHECKPOINT_PERCENT}%, Stop {config.TRAILING_FIRST_STOP_PERCENT}%")
