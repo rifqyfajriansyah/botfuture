@@ -95,6 +95,7 @@ BTC_MIN_SHORT_RSI_ROCKET = 26.0             # [Opsi B] Lantai dasar SHORT dilong
 BTC_OPSI_B_MIN_SCORE = 90                   # [Opsi B] Skor wajib >= 90 (Grade S) untuk lolos di zona RSI 26 - 32
 BTC_OPSI_B_MIN_VOL_RATIO = 1.40             # [Opsi B] Volume ledakan wajib >= 1.40x SMA 20
 BTC_OPSI_B_MIN_WICK_PERCENT = 20.0          # [Opsi B] Ekor atas penolakan (upper wick) wajib >= 20%
+BTC_OPSI_B_MAX_BUYER_WICK_PERCENT = 20.0    # [Opsi B] Maksimum ekor bawah (perlawanan buyer) agar tidak kena short squeeze (< 20%)
 BTC_MAX_LONG_RSI = 80.0                     # Dilarang buka LONG jika RSI 15m BTC >= 80 (jenuh beli ekstrem di pucuk rawan dump kilat, hemat -$33.69 USDT)
 BTC_CHOP_RSI_CRASH_FLOOR = 40.0             # DILARANG KERAS BUKA LONG jika RSI 15m BTC < 40 (pasar dingin/sedang dump parah)
 ANOMALY_MIN_SCORE = 90                      # Skor sinyal wajib >= 90 (Grade S) untuk boleh decoupling lawan arus BTC

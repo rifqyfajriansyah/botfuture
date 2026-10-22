@@ -922,12 +922,13 @@ class SignalEngine:
                         req_score = getattr(config, "BTC_OPSI_B_MIN_SCORE", 90)
                         req_vol = getattr(config, "BTC_OPSI_B_MIN_VOL_RATIO", 1.40)
                         req_wick = getattr(config, "BTC_OPSI_B_MIN_WICK_PERCENT", 20.0)
+                        req_buyer_wick = getattr(config, "BTC_OPSI_B_MAX_BUYER_WICK_PERCENT", 20.0)
 
                         is_rocket_qualified = (
                             score_short >= req_score and
                             vol_r_chk >= req_vol and
                             wick_r_chk >= req_wick and
-                            opp_wick_chk < 20.0
+                            opp_wick_chk < req_buyer_wick
                         )
                         if not is_rocket_qualified:
                             logger.info(
