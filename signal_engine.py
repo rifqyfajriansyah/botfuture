@@ -544,6 +544,8 @@ class SignalEngine:
             "price": 0,
         }
         
+        needs_rocket_dump_confirmation = False
+        
         try:
             # Blacklist check
             base_sym = symbol.replace(":USDT", "")
@@ -600,9 +602,15 @@ class SignalEngine:
                     can_long = False
                 # 3. Dilarang keras SHORT di dasar jurang jenuh jual (Anti-rebound dead-cat)
                 btc_min_short_rsi = getattr(config, "BTC_MIN_SHORT_RSI", 32.0)
-                if can_short and btc_rsi_15m < btc_min_short_rsi:
-                    logger.info(f"🚫 SHORT {symbol} diblokir: BTC 15m RSI ({btc_rsi_15m:.1f}) oversold (< {btc_min_short_rsi}), rawan rebound kilat!")
-                    can_short = False
+                btc_min_short_rsi_rocket = getattr(config, "BTC_MIN_SHORT_RSI_ROCKET", 26.0)
+                if can_short:
+                    if btc_rsi_15m < btc_min_short_rsi_rocket:
+                        logger.info(f"🚫 SHORT {symbol} diblokir: BTC 15m RSI ({btc_rsi_15m:.1f}) oversold ekstrem (< {btc_min_short_rsi_rocket}), rawan rebound kilat!")
+                        can_short = False
+                    elif btc_rsi_15m < btc_min_short_rsi:
+                        # Opsi B: Berada di zona transisi 26.0 - 32.0.
+                        # Izinkan lanjut ke kalkulasi indikator, tapi WAJIB lolos syarat Grade-S Rocket Dump solid!
+                        needs_rocket_dump_confirmation = True
                 # 4. Dilarang keras LONG di pucuk jenuh beli ekstrem (Anti-pucuk / Overbought Ekstrem, hemat -$33.69 USDT)
                 btc_max_long_rsi = getattr(config, "BTC_MAX_LONG_RSI", 80.0)
                 if can_long and btc_rsi_15m >= btc_max_long_rsi:
@@ -788,7 +796,7 @@ class SignalEngine:
 
                             is_rocket_long = (score_long >= min_rocket_score) and (is_vol_rocket or is_wick_rocket)
 
-                            # DETEKSI TEKANAN JUAL DI PUCUK (ADAPTIVE PRESSURE BIDDING - SWEET SPOT 0.35%):
+                            # DETEKSI TEKANAN JUAL DI PUCUK & KALIBRASI PARAMETER BTC (BTC-GUIDED ADAPTIVE SNIPER):
                             has_selling_pressure = False
                             is_micro_dump = False
                             if getattr(config, "ADAPTIVE_PRESSURE_ENTRY_ENABLED", True):
@@ -797,43 +805,63 @@ class SignalEngine:
                                 if opp_wick_long >= opp_threshold or is_micro_dump or is_macro_adverse_long:
                                     has_selling_pressure = True
 
-                            if has_selling_pressure:
-                                # ADA TEKANAN JUAL: BATALKAN FAST-FILL ROKET & TAWAR DI SWEET SPOT 0.35%!
-                                is_rocket_long = False
-                                ext_threshold = getattr(config, "PRESSURE_EXTREME_WICK_THRESHOLD", 35.0)
-                                if opp_wick_long >= ext_threshold:
-                                    disc_pct = getattr(config, "PRESSURE_EXTREME_OFFSET_PERCENT", 0.45)
-                                else:
-                                    disc_pct = getattr(config, "PRESSURE_SWEET_SPOT_OFFSET_PERCENT", 0.35)
+                            # Ambil data real-time BTC untuk kalibrasi mode sniper
+                            btc_bias = self._get_btc_bias()
+                            btc_rsi = self._get_btc_rsi_15m()
+                            btc_15m_pct = getattr(self, "_cached_btc_15m_pct", 0.0)
+                            is_btc_chop = getattr(self, "_is_btc_chop", False) or (btc_bias == "sideways")
+                            
+                            is_btc_overbought = btc_rsi >= getattr(config, "BTC_SNIPER_OVERBOUGHT_RSI", 70.0)
+                            is_btc_retrace = btc_15m_pct <= getattr(config, "BTC_SNIPER_RETRACE_DROP_PCT", -0.10)
+                            ext_threshold = getattr(config, "PRESSURE_EXTREME_WICK_THRESHOLD", 35.0)
+                            is_alt_extreme_wick = opp_wick_long >= ext_threshold
 
+                            # 1. DEFENSIVE DEEP-DISCOUNT SNIPER (0.45%):
+                            # Jika BTC Overbought (RSI >= 70), BTC Retrace (15m Chg <= -0.10%), atau Altcoin ada jarum seller brutal (>= 35%)
+                            if is_btc_overbought or is_btc_retrace or is_alt_extreme_wick:
+                                is_rocket_long = False
+                                disc_pct = getattr(config, "PRESSURE_EXTREME_OFFSET_PERCENT", 0.45)
                                 suggested_entry = current_close * (1.0 - (disc_pct / 100.0))
                                 result["suggested_entry_price"] = suggested_entry
                                 result["is_rocket"] = False
+                                trigger_reasons = []
+                                if is_btc_overbought: trigger_reasons.append(f"BTC Overbought RSI {btc_rsi:.1f}>=70")
+                                if is_btc_retrace: trigger_reasons.append(f"BTC Retrace 15m {btc_15m_pct:+.2f}%")
+                                if is_alt_extreme_wick: trigger_reasons.append(f"Alt Upper Wick {opp_wick_long:.1f}%>=35%")
                                 logger.info(
-                                    f"🛡️ ADAPTIVE BID (TEKANAN JUAL TERDETEKSI) for {symbol}: "
-                                    f"Upper Wick {opp_wick_long:.1f}%, 1m Red: {is_micro_dump}, Macro Dump: {is_macro_adverse_long} "
-                                    f"-> Tawar Murah di Lembah @ {suggested_entry:.6f} (Diskon: {disc_pct:.2f}%)!"
+                                    f"🛡️ DEFENSIVE DEEP-DISCOUNT SNIPER for {symbol} ({', '.join(trigger_reasons)}) "
+                                    f"-> Pasang Jaring Dalam @ {suggested_entry:.6f} (Diskon: -{disc_pct:.2f}%)!"
                                 )
-                            elif is_rocket_long:
+                            # 2. ROCKET MOMENTUM SNIPER (0.05% Fast-fill Mikro - Anti Ketinggalan Kereta):
+                            # Terjadi jika:
+                            # a) Sinyal terkonfirmasi roket (score >= 85 & vol/wick spike)
+                            # b) BTC Bullish Sehat (50 <= RSI <= 68 & Chg >= 0%)
+                            # c) Altcoin bersih tanpa tekanan seller (Upper Wick < 20% & 1m bukan red dump)
+                            elif is_rocket_long and not has_selling_pressure and (btc_bias == "bullish") and (getattr(config, "BTC_SNIPER_HEALTHY_MIN_RSI", 50.0) <= btc_rsi <= getattr(config, "BTC_SNIPER_HEALTHY_MAX_RSI", 68.0)) and (btc_15m_pct >= 0.0):
                                 micro_offset = getattr(config, "ROCKET_ENTRY_OFFSET_PERCENT", 0.05) / 100.0
                                 suggested_entry = current_close * (1.0 - micro_offset)
                                 result["suggested_entry_price"] = suggested_entry
                                 result["is_rocket"] = True
                                 qualifier = "Vol Spike" if is_vol_rocket else "Rejection Wick"
                                 logger.info(
-                                    f"🚀 ROCKET ENTRY LONG for {symbol}: Score {score_long}, {qualifier} confirmed "
-                                    f"(Vol: {vol_r_long:.2f}x, Wick: {wick_r_long:.1f}%) "
+                                    f"🚀 ROCKET MOMENTUM SNIPER for {symbol}: Score {score_long}, {qualifier} confirmed, "
+                                    f"BTC Bullish Sehat (RSI: {btc_rsi:.1f}, Chg: {btc_15m_pct:+.2f}%) "
                                     f"-> Fast-fill mikro @ {suggested_entry:.6f} (-{micro_offset*100:.2f}%)!"
                                 )
+                            # 3. SWEET SPOT CONFLUENCE SNIPER (0.35% Diskon):
+                            # Default saat BTC Sideways/Chop, ada perlawanan seller ringan (Wick 20-35% atau 1m Red), atau sinyal normal
                             else:
-                                atr_pullback = current_close - (atr_mult * atr_val)
-                                suggested_entry = max(ema_21_val, atr_pullback)
-                                min_disc = 0.9965 if is_macro_adverse_long else 0.9970
-                                max_discount_price = current_close * 0.990
-                                min_discount_price = current_close * min_disc
-                                suggested_entry = max(max_discount_price, min(min_discount_price, suggested_entry))
+                                is_rocket_long = False
+                                disc_pct = getattr(config, "PRESSURE_SWEET_SPOT_OFFSET_PERCENT", 0.35)
+                                suggested_entry = current_close * (1.0 - (disc_pct / 100.0))
                                 result["suggested_entry_price"] = suggested_entry
                                 result["is_rocket"] = False
+                                btc_info = f"BTC: {btc_bias.upper()} (RSI {btc_rsi:.1f})"
+                                alt_info = f"Upper Wick: {opp_wick_long:.1f}%, 1m Red: {is_micro_dump}"
+                                logger.info(
+                                    f"⚖️ SWEET SPOT SNIPER for {symbol} ({btc_info} | {alt_info}) "
+                                    f"-> Tawar Murah di Lembah @ {suggested_entry:.6f} (Diskon: -{disc_pct:.2f}%)!"
+                                )
                         
                         logger.info(
                             f"  🎯 TPLR LONG VALIDATED for {symbol} | Score: {score_long} | "
@@ -874,6 +902,44 @@ class SignalEngine:
                             logger.info(
                                 f"⭐ SHORT {symbol} (Lawan Arus BTC Bullish) TER-CONFIRM SOLID! "
                                 f"[Wick: {wick_r:.1f}%, RSI: {cur_rsi:.1f}, Vol: {vol_r:.2f}x, Score: {score_short}] -> Lolos Eksekusi Decoupling!"
+                            )
+
+                    # Validasi Opsi B (Zone BTC RSI 26.0 - 32.0: Wajib Grade-S Rocket Dump Solid)
+                    if is_short and needs_rocket_dump_confirmation:
+                        try:
+                            vol_r_chk = float(str(details_short.get("vol_ratio", "1.0")).replace("x", ""))
+                        except Exception:
+                            vol_r_chk = 1.0
+                        try:
+                            wick_r_chk = float(str(details_short.get("upper_wick_pct", "0.0")).replace("%", ""))
+                        except Exception:
+                            wick_r_chk = 0.0
+                        try:
+                            opp_wick_chk = float(str(details_short.get("lower_wick_pct", "0.0")).replace("%", ""))
+                        except Exception:
+                            opp_wick_chk = 0.0
+
+                        req_score = getattr(config, "BTC_OPSI_B_MIN_SCORE", 90)
+                        req_vol = getattr(config, "BTC_OPSI_B_MIN_VOL_RATIO", 1.40)
+                        req_wick = getattr(config, "BTC_OPSI_B_MIN_WICK_PERCENT", 20.0)
+
+                        is_rocket_qualified = (
+                            score_short >= req_score and
+                            vol_r_chk >= req_vol and
+                            wick_r_chk >= req_wick and
+                            opp_wick_chk < 20.0
+                        )
+                        if not is_rocket_qualified:
+                            logger.info(
+                                f"🚫 SHORT {symbol} diblokir [Opsi B Filter]: BTC RSI 15m ({btc_rsi_15m:.1f} < {btc_min_short_rsi}) "
+                                f"dan koin bukan Grade-S Rocket Dump solid! "
+                                f"(Score: {score_short}/{req_score}, Vol: {vol_r_chk:.2f}x/{req_vol}x, Wick: {wick_r_chk:.1f}%/{req_wick}%, Buyer Wick: {opp_wick_chk:.1f}%)"
+                            )
+                            is_short = False
+                        else:
+                            logger.info(
+                                f"🚀 OPSI B ROCKET DUMP SHORT VALIDATED for {symbol} di BTC RSI {btc_rsi_15m:.1f}! "
+                                f"(Score: {score_short}, Vol: {vol_r_chk:.2f}x, Rejection Wick: {wick_r_chk:.1f}%) -> Lolos Eksekusi Khusus!"
                             )
 
                     if is_short:
@@ -922,7 +988,7 @@ class SignalEngine:
 
                             is_rocket_short = (score_short >= min_rocket_score) and (is_vol_rocket or is_wick_rocket)
 
-                            # DETEKSI TEKANAN BELI DI DASAR (ADAPTIVE PRESSURE ASKING - SWEET SPOT +0.35%):
+                            # DETEKSI TEKANAN BELI DI DASAR & KALIBRASI PARAMETER BTC (BTC-GUIDED ADAPTIVE SNIPER):
                             has_buying_pressure = False
                             is_micro_pump = False
                             if getattr(config, "ADAPTIVE_PRESSURE_ENTRY_ENABLED", True):
@@ -931,43 +997,63 @@ class SignalEngine:
                                 if opp_wick_short >= opp_threshold or is_micro_pump or is_macro_adverse_short:
                                     has_buying_pressure = True
 
-                            if has_buying_pressure:
-                                # ADA TEKANAN BELI: BATALKAN FAST-FILL ROKET & JUAL MAHAL DI SWEET SPOT +0.35%!
-                                is_rocket_short = False
-                                ext_threshold = getattr(config, "PRESSURE_EXTREME_WICK_THRESHOLD", 35.0)
-                                if opp_wick_short >= ext_threshold:
-                                    prem_pct = getattr(config, "PRESSURE_EXTREME_OFFSET_PERCENT", 0.45)
-                                else:
-                                    prem_pct = getattr(config, "PRESSURE_SWEET_SPOT_OFFSET_PERCENT", 0.35)
+                            # Ambil data real-time BTC untuk kalibrasi mode sniper SHORT
+                            btc_bias = self._get_btc_bias()
+                            btc_rsi = self._get_btc_rsi_15m()
+                            btc_15m_pct = getattr(self, "_cached_btc_15m_pct", 0.0)
+                            is_btc_chop = getattr(self, "_is_btc_chop", False) or (btc_bias == "sideways")
+                            
+                            is_btc_oversold = btc_rsi <= getattr(config, "BTC_SNIPER_OVERSOLD_RSI", 30.0)
+                            is_btc_bounce = btc_15m_pct >= 0.10
+                            ext_threshold = getattr(config, "PRESSURE_EXTREME_WICK_THRESHOLD", 35.0)
+                            is_alt_extreme_wick = opp_wick_short >= ext_threshold
 
+                            # 1. DEFENSIVE DEEP-PREMIUM SHORT (+0.45%):
+                            # Terjadi jika BTC Oversold (RSI <= 30), BTC Rebound (15m Chg >= +0.10%), atau Altcoin ada jarum buyer brutal (>= 35%)
+                            if is_btc_oversold or is_btc_bounce or is_alt_extreme_wick:
+                                is_rocket_short = False
+                                prem_pct = getattr(config, "PRESSURE_EXTREME_OFFSET_PERCENT", 0.45)
                                 suggested_entry = current_close * (1.0 + (prem_pct / 100.0))
                                 result["suggested_entry_price"] = suggested_entry
                                 result["is_rocket"] = False
+                                trigger_reasons = []
+                                if is_btc_oversold: trigger_reasons.append(f"BTC Oversold RSI {btc_rsi:.1f}<=30")
+                                if is_btc_bounce: trigger_reasons.append(f"BTC Bounce 15m {btc_15m_pct:+.2f}%")
+                                if is_alt_extreme_wick: trigger_reasons.append(f"Alt Lower Wick {opp_wick_short:.1f}%>=35%")
                                 logger.info(
-                                    f"🛡️ ADAPTIVE ASK (TEKANAN BELI TERDETEKSI) for {symbol}: "
-                                    f"Lower Wick {opp_wick_short:.1f}%, 1m Green: {is_micro_pump}, Macro Pump: {is_macro_adverse_short} "
-                                    f"-> Jual Mahal di Pucuk @ {suggested_entry:.6f} (Premium: +{prem_pct:.2f}%)!"
+                                    f"🛡️ DEFENSIVE DEEP-PREMIUM SHORT for {symbol} ({', '.join(trigger_reasons)}) "
+                                    f"-> Jual Sangat Mahal @ {suggested_entry:.6f} (Premium: +{prem_pct:.2f}%)!"
                                 )
-                            elif is_rocket_short:
+                            # 2. ROCKET MOMENTUM SHORT (+0.05% mikro):
+                            # Terjadi jika:
+                            # a) Sinyal terkonfirmasi roket dump (score >= 85 & vol/wick spike)
+                            # b) BTC Bearish Sehat (26 <= RSI <= 50 & Chg <= 0%)
+                            # c) Altcoin bersih tanpa dorongan buyer (Lower Wick < 20% & 1m bukan green pump)
+                            elif is_rocket_short and not has_buying_pressure and (btc_bias == "bearish") and (getattr(config, "BTC_MIN_SHORT_RSI_ROCKET", 26.0) <= btc_rsi <= 50.0) and (btc_15m_pct <= 0.0):
                                 micro_offset = getattr(config, "ROCKET_ENTRY_OFFSET_PERCENT", 0.05) / 100.0
                                 suggested_entry = current_close * (1.0 + micro_offset)
                                 result["suggested_entry_price"] = suggested_entry
                                 result["is_rocket"] = True
                                 qualifier = "Vol Spike" if is_vol_rocket else "Rejection Wick"
                                 logger.info(
-                                    f"🚀 ROCKET ENTRY SHORT for {symbol}: Score {score_short}, {qualifier} confirmed "
-                                    f"(Vol: {vol_r_short:.2f}x, Wick: {wick_r_short:.1f}%) "
+                                    f"🚀 ROCKET DUMP SHORT for {symbol}: Score {score_short}, {qualifier} confirmed, "
+                                    f"BTC Bearish Sehat (RSI: {btc_rsi:.1f}, Chg: {btc_15m_pct:+.2f}%) "
                                     f"-> Fast-fill mikro @ {suggested_entry:.6f} (+{micro_offset*100:.2f}%)!"
                                 )
+                            # 3. SWEET SPOT CONFLUENCE SHORT (+0.35% Premium):
+                            # Default saat BTC Sideways/Chop, ada perlawanan buyer ringan (Wick 20-35% atau 1m Green), atau sinyal normal
                             else:
-                                atr_pullback = current_close + (atr_mult * atr_val)
-                                suggested_entry = min(ema_21_val, atr_pullback)
-                                min_prem = 1.0035 if is_macro_adverse_short else 1.0030
-                                max_premium_price = current_close * 1.010
-                                min_premium_price = current_close * min_prem
-                                suggested_entry = min(max_premium_price, max(min_premium_price, suggested_entry))
+                                is_rocket_short = False
+                                prem_pct = getattr(config, "PRESSURE_SWEET_SPOT_OFFSET_PERCENT", 0.35)
+                                suggested_entry = current_close * (1.0 + (prem_pct / 100.0))
                                 result["suggested_entry_price"] = suggested_entry
                                 result["is_rocket"] = False
+                                btc_info = f"BTC: {btc_bias.upper()} (RSI {btc_rsi:.1f})"
+                                alt_info = f"Lower Wick: {opp_wick_short:.1f}%, 1m Green: {is_micro_pump}"
+                                logger.info(
+                                    f"⚖️ SWEET SPOT SHORT for {symbol} ({btc_info} | {alt_info}) "
+                                    f"-> Jual Mahal di Pucuk @ {suggested_entry:.6f} (Premium: +{prem_pct:.2f}%)!"
+                                )
                         
                         logger.info(
                             f"  🎯 TPLR SHORT VALIDATED for {symbol} | Score: {score_short} | "

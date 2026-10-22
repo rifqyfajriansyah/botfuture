@@ -90,7 +90,11 @@ BTC_REBOUND_MAX_15M_PCT = 0.14              # Dilarang SHORT jika lilin 15m BTC 
 BTC_SLIP_MAX_15M_PCT = 0.14                 # Dilarang LONG jika lilin 15m BTC sedang longsor turun <= -0.14% (anti pisau jatuh)
 BTC_CHOP_MAX_LONG_RSI = 60.0               # [Adaptive Chop Gate] Di pasar Sideways, dilarang LONG jika BTC 15m RSI >= 60.0 (atap resisten kotak)
 BTC_CHOP_MIN_SHORT_RSI = 50.0              # [Adaptive Chop Gate] Di pasar Sideways, dilarang SHORT jika BTC 15m RSI >= 50.0 (BTC di separuh atas kotak)
-BTC_MIN_SHORT_RSI = 32.0                    # Dilarang buka SHORT jika RSI 15m BTC < 32 (jenuh jual di dasar support rawan memantul)
+BTC_MIN_SHORT_RSI = 32.0                    # Dilarang buka SHORT jika RSI 15m BTC < 32 (jenuh jual di dasar support rawan memantul untuk koin standar)
+BTC_MIN_SHORT_RSI_ROCKET = 26.0             # [Opsi B] Lantai dasar SHORT dilonggarkan ke 26.0 khusus koin Grade-S Rocket Dump
+BTC_OPSI_B_MIN_SCORE = 90                   # [Opsi B] Skor wajib >= 90 (Grade S) untuk lolos di zona RSI 26 - 32
+BTC_OPSI_B_MIN_VOL_RATIO = 1.40             # [Opsi B] Volume ledakan wajib >= 1.40x SMA 20
+BTC_OPSI_B_MIN_WICK_PERCENT = 20.0          # [Opsi B] Ekor atas penolakan (upper wick) wajib >= 20%
 BTC_MAX_LONG_RSI = 80.0                     # Dilarang buka LONG jika RSI 15m BTC >= 80 (jenuh beli ekstrem di pucuk rawan dump kilat, hemat -$33.69 USDT)
 BTC_CHOP_RSI_CRASH_FLOOR = 40.0             # DILARANG KERAS BUKA LONG jika RSI 15m BTC < 40 (pasar dingin/sedang dump parah)
 ANOMALY_MIN_SCORE = 90                      # Skor sinyal wajib >= 90 (Grade S) untuk boleh decoupling lawan arus BTC
@@ -201,6 +205,21 @@ PRESSURE_SWEET_SPOT_OFFSET_PERCENT = 0.35     # Sweet spot diskon/premium saat a
 PRESSURE_EXTREME_WICK_THRESHOLD = 35.0        # Jika ekor lawan sangat panjang (>= 35%), seller ekstra brutal
 PRESSURE_EXTREME_OFFSET_PERCENT = 0.45        # Diskon/premium saat tekanan ekstrem (0.45%)
 CHECK_MICRO_1M_PRESSURE = True                # Cek konfirmasi lilin 1m terakhir
+
+# =============================================================================
+# BTC-GUIDED ADAPTIVE SNIPER CALIBRATION
+# =============================================================================
+# Menyesuaikan mode sniper berdasarkan nakhoda pasar (BTC):
+# 1. BTC Overbought Ekstrem (RSI >= 70) / Retracing (15m Chg <= -0.10%): Mode Defensive Deep Discount (0.45%)
+# 2. BTC Sideways / Chop Zone / Altcoin ada penolakan: Mode Sweet Spot Discount (0.35%)
+# 3. BTC Bullish Sehat (50 <= RSI <= 68 & Chg >= 0%) + Altcoin Bersih: Mode Rocket Fast-Fill (0.05%)
+BTC_SNIPER_CALIBRATION_ENABLED = True
+BTC_SNIPER_OVERBOUGHT_RSI = 70.0              # Area overbought ekstrem BTC (rawan koreksi mendadak)
+BTC_SNIPER_OVERSOLD_RSI = 30.0                # Area oversold ekstrem BTC (rawan short squeeze)
+BTC_SNIPER_RETRACE_DROP_PCT = -0.10           # Lilin 15m BTC sedang merah/turun
+BTC_SNIPER_HEALTHY_MIN_RSI = 50.0             # Batas bawah RSI BTC momentum sehat
+BTC_SNIPER_HEALTHY_MAX_RSI = 68.0             # Batas atas RSI BTC momentum sehat (sebelum pucuk overbought)
+
 
 # Jalur Ekstra: Zero-Fill Momentum Chase on Timeout (Dinonaktifkan sesuai instruksi user)
 ZERO_FILL_CHASE_ENABLED = False         # Dinonaktifkan: jika order tawar belum keisi saat timeout, cancel murni tanpa kejar pasar!
