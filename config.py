@@ -121,16 +121,16 @@ MACRO_WICK_RECOVERY_PROTECT_PERCENT = 28.0    # Jangan tebas jika koin membentuk
 # =============================================================================
 # Level 1: Sinyal Kuat (High Conviction - Score >= 80)
 HIGH_CONVICTION_SCORE = 80              # Ambang batas sinyal super kuat
-HIGH_CONVICTION_OFFSET_PERCENT = 0.1    # Limit order sangat rapat (0.1%) agar cepat fill
-HIGH_CONVICTION_TIMEOUT_MINUTES = 5     # Timeout 5 menit (cepat alihkan modal jika tidak dijemput)
+HIGH_CONVICTION_OFFSET_PERCENT = 0.08   # Limit order sangat rapat (0.08%) agar cepat fill & anti-ketinggalan
+HIGH_CONVICTION_TIMEOUT_MINUTES = 3     # Timeout cepat 3 menit (segera alihkan modal jika tidak dijemput)
 
 # Level 2: Sinyal Standar (Normal Conviction - Score 70-79)
-NORMAL_CONVICTION_OFFSET_PERCENT = 0.35 # Limit order tawar sehat (0.35%)
-NORMAL_CONVICTION_TIMEOUT_MINUTES = 7   # Timeout 7 menit (tidak sandera modal lama-lama)
+NORMAL_CONVICTION_OFFSET_PERCENT = 0.10 # Limit order rapat (0.10% - Golden Sweet Spot)
+NORMAL_CONVICTION_TIMEOUT_MINUTES = 5   # Timeout 5 menit (tidak sandera modal lama-lama)
 
 # Default fallback / backward compatibility
-ENTRY_OFFSET_PERCENT = 0.35             # Default limit offset
-ORDER_TIMEOUT_MINUTES = 7               # Default timeout 7 menit
+ENTRY_OFFSET_PERCENT = 0.10             # Default limit offset (0.10%)
+ORDER_TIMEOUT_MINUTES = 5               # Default timeout 5 menit
 ORDER_CHECK_INTERVAL = 10               # Cek order setiap 10 detik
 
 # =============================================================================
@@ -193,18 +193,19 @@ ROCKET_ENTRY_OFFSET_PERCENT = 0.05      # Offset mikro sangat tipis (0.05%) agar
 ROCKET_TIMEOUT_MINUTES = 3              # Timeout cepat 3 menit (koin roket langsung jalan)
 
 # =============================================================================
-# ADAPTIVE PRESSURE BIDDING (SWEET SPOT 0.35% - ANTI TEBASAN PUCUK)
+# ADAPTIVE PRESSURE BIDDING (GOLDEN SWEET SPOT 0.10% - ANTI KETINGGALAN KERETA)
 # =============================================================================
 # Filosofi Disiplin Sniper:
 # Saat sinyal muncul, jika ada indikasi tekanan berlawanan arah (penjual mengguyur di pucuk):
-# - LONG: Ada jarum atas (upper wick) / lilin 1m merah / BTC goyang -> Tawar di diskon sweet spot 0.35%!
-# - SHORT: Ada jarum bawah (lower wick) / lilin 1m hijau / BTC membal -> Jual di premium sweet spot +0.35%!
-# Jika kondisi roket bersih murni tanpa hambatan seller/buyer -> Masuk via Jalur Roket (0.05%) agar tidak ketinggalan!
+# - LONG: Ada jarum atas (upper wick) / lilin 1m merah / BTC goyang -> Tawar di diskon sweet spot 0.10%!
+# - SHORT: Ada jarum bawah (lower wick) / lilin 1m hijau / BTC membal -> Jual di premium sweet spot +0.10%!
+# - Jika tekanan ekstrem (ekor panjang >= 35%) -> Tawar lebih dalam di 0.18%!
+# Jika kondisi roket bersih murni tanpa hambatan seller/buyer -> Masuk via Jalur Roket (0.05%) agar instan fill!
 ADAPTIVE_PRESSURE_ENTRY_ENABLED = True
 PRESSURE_OPPOSING_WICK_THRESHOLD = 20.0       # Batas ekor lawan (>= 20%) indikasi tekanan seller/buyer
-PRESSURE_SWEET_SPOT_OFFSET_PERCENT = 0.35     # Sweet spot diskon/premium saat ada tekanan (0.35%)
+PRESSURE_SWEET_SPOT_OFFSET_PERCENT = 0.10     # Golden Sweet Spot diskon/premium rapat (0.10% - fill rate 80%+)
 PRESSURE_EXTREME_WICK_THRESHOLD = 35.0        # Jika ekor lawan sangat panjang (>= 35%), seller ekstra brutal
-PRESSURE_EXTREME_OFFSET_PERCENT = 0.45        # Diskon/premium saat tekanan ekstrem (0.45%)
+PRESSURE_EXTREME_OFFSET_PERCENT = 0.18        # Diskon/premium saat tekanan ekstrem (0.18%)
 CHECK_MICRO_1M_PRESSURE = True                # Cek konfirmasi lilin 1m terakhir
 
 # =============================================================================
@@ -396,7 +397,7 @@ FLEXIBLE_MACRO_ENABLED = True                    # Aktifkan perisai makro likuid
 DOM_SYMBOL = "BTCDOM/USDT"                       # Simbol dominansi BTC
 MACRO_ADVERSE_MIN_SCORE = 90                     # Syarat score minimal jika melawan arah makro
 MACRO_ADVERSE_MIN_VOL_RATIO = 1.35               # Syarat lonjakan volume minimal jika melawan makro
-MACRO_ADVERSE_EXTRA_OFFSET = 0.20                # Tambahan diskon limit order (+0.20%) saat lawan arah makro
+MACRO_ADVERSE_EXTRA_OFFSET = 0.05                # Tambahan diskon limit order (+0.05%) saat lawan arah makro
 
 # =============================================================================
 # PANIC VOLUME DUMP CUT (Deteksi Air Terjun vs Gojekan Jarum di Lilin 1m)
