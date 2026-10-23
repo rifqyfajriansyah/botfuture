@@ -151,12 +151,12 @@ class OrderManager:
             if suggested_price is not None and suggested_price > 0 and getattr(config, "DYNAMIC_PULLBACK_ENTRY_ENABLED", True):
                 entry_price = float(suggested_price)
                 gap_pct = abs(current_price - entry_price) / current_price * 100
-                if is_rocket or gap_pct <= 0.08:
+                if is_rocket or gap_pct <= 0.12:
                     lane_desc = "🚀 ROCKET FAST-FILL"
-                elif gap_pct >= 0.15:
-                    lane_desc = "🛡️ DEFENSIVE SNIPER"
+                elif gap_pct >= 0.40:
+                    lane_desc = "🛡️ DEFENSIVE DEEP-DISCOUNT"
                 else:
-                    lane_desc = "🎯 GOLDEN SWEET-SPOT"
+                    lane_desc = "⚖️ SWEET-SPOT CONFLUENCE"
                 logger.info(
                     f"{lane_desc} ENTRY: {signal} {symbol} @ {entry_price} "
                     f"(Diskon/Offset: {gap_pct:.2f}% dari harga pasar {current_price}) | Timeout: {timeout_min}m"
