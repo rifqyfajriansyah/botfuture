@@ -58,8 +58,10 @@ LONG_MAX_RSI = 52.0                             # Anti-Pucuk Sejati: Dilarang LO
 SHORT_MIN_RSI = 48.0                            # Anti-Dasar Sejati: Dilarang SHORT jika RSI < 48.0 (wajib retest resisten)
 MIN_ENTRY_REJECTION_WICK_PERCENT = 25.0         # Wick minimal 25% (ekor penolakan nyata, menolak lilin botak)
 CHOP_MIN_REJECTION_WICK_PERCENT = 35.0          # Saat Sideways/Chop, Upper Wick SHORT wajib >= 35% (ekor penolakan tebal resisten)
-SHORT_TP1_PERCENT = 0.60                        # TP1 khusus SHORT lebih cepat di +0.60% (kunci cuan anti bounce-back)
-SHORT_SIDEWAYS_FULL_TEBAS = True                # Khusus SHORT di Sideways: Tebas 100% langsung di +0.60% via Market Order!
+SHORT_TP1_PERCENT = 0.60                        # TP1 khusus SHORT koin lemas di +0.60% (anti bounce-back). Koin VIP Runner bebas mengejar Dynamic TP!
+SHORT_SIDEWAYS_FULL_TEBAS = True                # Khusus SHORT di Sideways: Tebas 100% langsung di +0.60% via Market Order (Hanya untuk koin lemas, VIP Runner kebal!)
+RUNNER_MIN_ADX = 25.0                           # Batas minimal ADX 15m koin untuk tiket VIP Runner (tren turbo aktif)
+RUNNER_MIN_VOL_RATIO = 1.30                     # Batas lonjakan volume 15m untuk tiket VIP Runner (Whale masuk)
 COUNTER_TREND_ALLOWED = True                     # Boleh trade lawan arah BTC asal TER-CONFIRM
 COUNTER_TREND_MIN_SCORE = 90                     # Skor sinyal wajib Grade S (>= 90)
 COUNTER_TREND_MIN_WICK = 35.0                    # Wick rejection ekor penolakan wajib tebal >= 35%
@@ -250,15 +252,15 @@ STALL_GUARD_AGED_MIN_EXIT_PROFIT = 0.60
 #    - Disiplin ketat tebas pucuk (Pullback 0.18%, Wick 26%) mengunci profit tertinggi!
 CHOPPY_SIDEWAYS_TEBAS_ENABLED = True          # Tebas koin gakuat khusus saat pasar choppy/sideways
 CHOPPY_TEBAS_MIN_PEAK_PERCENT = 0.50          # Mulai aktif saat peak >= +0.50% (~$7 USD)
-CHOPPY_TEBAS_MATURE_PERCENT = 1.10            # Target pucuk matang (+1.10% / ~$15.4 USD) -> REKOR TERTINGGI!
+CHOPPY_TEBAS_MATURE_PERCENT = 0.85            # Target pucuk matang (+0.85% / ~$12 USD) -> Kunci cuan lebih awal!
 
-# Fase 1: Ruang Napas Awal (+0.50% s/d +1.10% / ~$7 s/d $15.4 USD) -> ANTI PREMATUR
+# Fase 1: Ruang Napas Awal (+0.50% s/d +0.85% / ~$7 s/d $12 USD) -> ANTI PREMATUR
 CHOPPY_TEBAS_EARLY_PULLBACK = 0.24            # Napas longgar 0.24% dari peak
 CHOPPY_TEBAS_EARLY_WICK = 38.0                # Hanya tebas jika wick reject ekstrem >= 38%
 CHOPPY_TEBAS_MIN_CANDLE_RANGE = 0.20          # Abaikan wick jika range lilin < 0.20% (anti false rejection doji tipis)
 
-# Fase 2: Pucuk Matang Disiplin (>= +1.10% / ~$15.4 USD) -> AMANKAN CUAN PUNCAK
-CHOPPY_TEBAS_MATURE_PULLBACK = 0.18           # Disiplin ketat melorot >= 0.18%
+# Fase 2: Pucuk Matang Disiplin (>= +0.85% / ~$12 USD) -> AMANKAN CUAN PUNCAK
+CHOPPY_TEBAS_MATURE_PULLBACK = 0.18           # Disiplin ketat melorot >= 0.18% langsung tebas 100%!
 CHOPPY_TEBAS_MATURE_WICK = 26.0               # Disiplin tebas jika ada wick reject >= 26%
 
 # Kondisi Khusus Volume: Whale Climax Dump Alert
@@ -298,6 +300,20 @@ DAILY_TARGET_PROFIT_PERCENT = 10.0            # Target cuan harian dinamis (10% 
 CHOPPY_RATCHET_TRIGGER_PERCENT = 0.50         # Stepped ratchet mulai trailing di pasar choppy mulai +0.50%
 CHOPPY_RATCHET_TRAIL_PERCENT = 0.38           # Jarak kawal lega 0.38% dari peak (napas aman, anti kejilat kocokan!)
 MOONBAG_TARGET_USD = 20.0                    # Target puncak profit satu trade ($20 USD | ~+2.72% harga)
+
+# Tangga Lantai Pengawalan Stepped Ratchet Bernafas (VIP Runner & Universal Floor):
+RATCHET_FLOOR_1_PEAK = 0.95                     # Sentuh +0.95% -> Kunci stop di +0.45% (jarak napas 0.50% lega)
+RATCHET_FLOOR_1_LOCK = 0.45
+RATCHET_FLOOR_2_PEAK = 1.50                     # Sentuh +1.50% -> Kunci stop di +0.85% (jarak napas 0.65% lega, pasti cuan ~$12+)
+RATCHET_FLOOR_2_LOCK = 0.85
+RATCHET_FLOOR_3_PEAK = 2.00                     # Sentuh +2.00% -> Kunci stop di +1.35% (jarak napas 0.65% lega, pasti cuan ~$19+)
+RATCHET_FLOOR_3_LOCK = 1.35
+RATCHET_FLOOR_4_PEAK = 2.50                     # Sentuh +2.50% -> Kunci stop di +1.80% (jarak napas 0.70% lega, pasti cuan ~$25+)
+RATCHET_FLOOR_4_LOCK = 1.80
+RATCHET_FLOOR_5_PEAK = 3.00                     # Sentuh +3.00% -> Kunci stop di +2.25% (jarak napas 0.75% lega, pasti cuan ~$31+)
+RATCHET_FLOOR_5_LOCK = 2.25
+RATCHET_FLOOR_6_PEAK = 4.00                     # Sentuh +4.00% -> Kunci stop di +3.10% (jarak napas 0.90% lega, pasti cuan ~$43+)
+RATCHET_FLOOR_6_LOCK = 3.10
 
 # =============================================================================
 # STAGNATION & TIME-STOP LOSS GUARDS (PENGAMAN KALAH SEMUA REGIME)
